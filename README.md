@@ -1,8 +1,8 @@
 # Gesture Interface
 
 A webcam-based gesture control tool for the desktop: track your hands with
-MediaPipe, drive the mouse cursor with your hand, and draw a nomadic horse
-archer's bow across the camera feed when you strike the pose.
+MediaPipe, drive the mouse cursor with your hand, and draw
+bow across the camera feed when you strike the pose.
 
 ## Setup
 One-time setup:
@@ -13,8 +13,6 @@ mkdir -p assets
 curl -fsSL -o assets/hand_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
 ```
-The `.task` file is MediaPipe's hand landmark detection model (~8 MB); it's
-gitignored and downloaded once rather than committed.
 
 To run the app:
 
@@ -40,9 +38,6 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Index + middle up, ring and pinky down | Scroll — move the hand up or down |
 | Flat open palm | Toggle pause, so you can rest or reposition your hand |
 | Fist + OK sign, two hands | Draw the bow |
-
-Every action fires once per gesture, on the edge, rather than on every frame the
-gesture is held.
 
 ### The bow
 
