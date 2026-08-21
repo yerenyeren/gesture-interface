@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+assets/hand_landmarker.task
+
+# Session handoffs are local working notes, not project history
+.claude/handoffs/
+
+# Local project instructions for Claude, not project history
+CLAUDE.md
