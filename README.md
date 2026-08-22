@@ -26,6 +26,9 @@ To run the unit tests:
 venv/bin/python -m pytest tests/ -v
 ```
 
+Press `q` in the camera window to quit, or `d` to toggle the FPS and
+per-stage timing readout.
+
 ## Gestures
 
 The mode currently in effect is shown in the top-left of the camera window.
@@ -69,3 +72,18 @@ never loose an arrow by accident.
 - [x] More gestures (right click, scroll, pause)
 - [ ] Draw the animation over the desktop itself, not just the camera window
 - [ ] More gestures (volume, media control, ...)
+
+## How this was built
+
+I built this with [Claude Code](https://claude.com/claude-code). I set the
+direction, chose the approach and did the debugging against the real hardware;
+much of the code itself was written with AI assistance.
+
+I'm using it to learn this domain rather than to skip it — hand landmark
+geometry, gesture debouncing, and the surprising amount of webcam and
+display-server behaviour underneath both. A fair share of the work here was
+things no model could have told me from the outside: that the frame rate
+collapsed only while a hand was tracked, that the camera was returning black
+frames, that a fail-safe meant to stop runaway scripts kills an app whose whole
+purpose is moving the cursor. My plan is to build the next tool like this one
+without the assistance, once I understand the pieces well enough to.
