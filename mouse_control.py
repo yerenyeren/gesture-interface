@@ -39,9 +39,20 @@ class MouseController:
         self._smoothed = None
         self._last_sent = None
 
+    def to_screen(self, x, y):
+        """Frame coordinates to screen coordinates, before smoothing or clamping.
+
+        Public so the desktop overlay can anchor the bow through exactly the
+        function that positions the cursor, rather than through a second
+        mapping that could drift from it.
+        """
+        return (
+            x / self.frame_width * self.screen_width,
+            y / self.frame_height * self.screen_height,
+        )
+
     def move_to(self, x, y):
-        target_x = x / self.frame_width * self.screen_width
-        target_y = y / self.frame_height * self.screen_height
+        target_x, target_y = self.to_screen(x, y)
 
         if self._smoothed is None:
             # The first move after a reset snaps. Easing in from wherever the

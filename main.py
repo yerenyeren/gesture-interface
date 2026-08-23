@@ -3,7 +3,8 @@ import time
 
 import cv2
 
-from animations import HorseBow, draw_ratio, MAX_DRAW, MIN_DRAW
+from animations import HorseBow, draw_ratio, BOW_HALF_LENGTH, MAX_DRAW, MIN_DRAW
+from desktop_overlay import DesktopOverlay, OverlayGeometry, arrow_bounds
 from gesture_state import EdgeDetector
 from gestures import (
     gesture_metrics,
@@ -21,6 +22,12 @@ from gestures import (
 )
 from hand_tracker import HandTracker
 from mouse_control import MouseController
+
+# How big the bow is drawn on the desktop overlay, relative to the size it is
+# drawn in the camera window. 1.0 keeps the same proportions it has on camera,
+# which also means it fills the screen the way it fills the frame — the first
+# thing worth turning down if that is too much. Shown on the `t` readout.
+OVERLAY_SCALE = 1.0
 
 SCROLL_DEADZONE_PX = 12
 SCROLL_GAIN = 0.4
@@ -179,26 +186,6 @@ def metric_segments(label, landmarks):
     return [ratios, pinch]
 
 
-def metrics_readout(measured, nocked):
-    """Tuning lines for the hands in play, plus the draw length when drawing."""
-    lines = []
-    for label, landmarks in measured:
-        lines.extend(metric_segments(label, landmarks))
-
-    if nocked is not None:
-        grip, nock, scale = nocked
-        length = math.hypot(grip[0] - nock[0], grip[1] - nock[1]) / scale if scale else 0
-        lines.append([
-            (
-                f"{'draw':<7}{length:.2f}x hand   ratio "
-                f"{draw_ratio(grip, nock, scale):.2f}   "
-                f"loose > {MIN_DRAW}   full at {MAX_DRAW}",
-                HUD_COLOR,
-            )
-        ])
-    return lines
-
-
 def draw_hud(frame, mode, stats=None, metrics=None):
     """Mode, optional timings, and optional per-hand tuning numbers."""
     y = 34
@@ -224,6 +211,64 @@ def _draw_runs(frame, runs, y, scale=0.5, outline=3, weight=1):
         x += cv2.getTextSize(text, HUD_FONT, scale, weight)[0][0]
 
 
+def overlay_geometry(mouse, frame_width, frame_height):
+    return OverlayGeometry(
+        (frame_width, frame_height),
+        (mouse.screen_width, mouse.screen_height),
+        anchor=mouse.to_screen,
+        bow_reach=BOW_HALF_LENGTH,
+        overlay_scale=OVERLAY_SCALE,
+    )
+
+
+def rebuild_for_screen(overlay, size, frame_width, frame_height):
+    """Rebuild everything that cached the screen size, after a monitor change.
+
+    `MouseController` reads `pyautogui.size()` once in its constructor, so it
+    goes stale on a display change too — the same staleness that used to crash
+    this app from the other direction.
+    """
+    overlay.close()
+    mouse = MouseController(frame_width, frame_height)
+    overlay = DesktopOverlay(*size)
+    overlay.open()
+    geometry = overlay_geometry(mouse, frame_width, frame_height)
+    return mouse, overlay, geometry, HorseBow(speed_scale=geometry.size_scale)
+
+
+def metrics_readout(measured, nocked, overlay=None, geometry=None):
+    """Tuning lines for the hands in play, plus the draw length when drawing."""
+    lines = []
+    for label, landmarks in measured:
+        lines.extend(metric_segments(label, landmarks))
+
+    if nocked is not None:
+        grip, nock, scale = nocked
+        length = math.hypot(grip[0] - nock[0], grip[1] - nock[1]) / scale if scale else 0
+        lines.append([
+            (
+                f"{'draw':<7}{length:.2f}x hand   ratio "
+                f"{draw_ratio(grip, nock, scale):.2f}   "
+                f"loose > {MIN_DRAW}   full at {MAX_DRAW}",
+                HUD_COLOR,
+            )
+        ])
+
+    if overlay is not None and geometry is not None:
+        rect = overlay.last_rect
+        pushed = f"{rect[2]}x{rect[3]}" if rect else "idle"
+        lines.append([
+            (
+                f"{'overlay':<7}{'on' if overlay.available else 'OFF'}   "
+                f"{overlay.width}x{overlay.height}   "
+                f"size x{geometry.size_scale:.2f} "
+                f"(OVERLAY_SCALE {geometry.overlay_scale})   push {pushed}",
+                HUD_COLOR,
+            )
+        ])
+    return lines
+
+
 def main():
     cap = open_camera()
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -240,6 +285,15 @@ def main():
     bow = HorseBow()
     timer = StageTimer()
 
+    overlay = DesktopOverlay(mouse.screen_width, mouse.screen_height)
+    overlay.open()
+    geometry = overlay_geometry(mouse, frame_width, frame_height)
+    # A second bow, in screen coordinates. Not the same instance drawn twice:
+    # `update` both advances and draws arrows, so sharing one would advance
+    # every arrow twice per frame.
+    screen_bow = HorseBow(speed_scale=geometry.size_scale)
+    overlay_on = True
+
     # Actions fire on gesture edges, never on every frame the gesture is held.
     left_click = EdgeDetector()
     right_click = EdgeDetector()
@@ -253,134 +307,164 @@ def main():
     last_scroll_y = None
     nocked = None  # (grip, nock, scale) from the most recent archery frame
 
-    while True:
-        started = time.perf_counter()
-        success, frame = cap.read()
-        if not success:
-            break
-        timer.record("cap", time.perf_counter() - started)
+    try:
+        while True:
+            started = time.perf_counter()
+            success, frame = cap.read()
+            if not success:
+                break
+            timer.record("cap", time.perf_counter() - started)
 
-        detect_started = time.perf_counter()
-        frame = cv2.flip(frame, 1)
-        frame, raw_hands = tracker.find_hands(frame, draw=False)
-        hands = [
-            tracker.landmark_positions(hand, frame_width, frame_height)
-            for hand in raw_hands
-        ]
-        timer.record("det", time.perf_counter() - detect_started)
+            detect_started = time.perf_counter()
+            frame = cv2.flip(frame, 1)
+            frame, raw_hands = tracker.find_hands(frame, draw=False)
+            hands = [
+                tracker.landmark_positions(hand, frame_width, frame_height)
+                for hand in raw_hands
+            ]
+            timer.record("det", time.perf_counter() - detect_started)
 
-        draw_started = time.perf_counter()
-        archery = find_archery_hands(hands)
-        at_full_draw.update(archery is not None)
+            draw_started = time.perf_counter()
+            archery = find_archery_hands(hands)
+            at_full_draw.update(archery is not None)
 
-        # The pose has already broken by the frame the string hand opens, so the
-        # shot is taken from the last state the bow was actually drawn in.
-        if at_full_draw.fell and nocked is not None:
-            bow.loose(*nocked)
-            nocked = None
+            # The pose has already broken by the frame the string hand opens, so the
+            # shot is taken from the last state the bow was actually drawn in.
+            if at_full_draw.fell and nocked is not None:
+                bow.loose(*nocked)
+                if overlay.available and overlay_on:
+                    screen_bow.loose(*geometry.map_pose(*nocked))
+                nocked = None
 
-        measured = []
-        if archery is not None:
-            grip_hand, string_hand = archery
-            nocked = (
-                palm_center(grip_hand),
-                pinch_point(string_hand),
-                hand_scale(grip_hand),
-            )
-            bow.draw(frame, *nocked)
-            mode = "DRAWING BOW"
-            measured = [("grip", grip_hand), ("string", string_hand)]
-            # The mouse deliberately sits idle: the string hand is pinching,
-            # which would otherwise read as a click.
-            for detector in (pause_toggle, left_click, right_click):
-                detector.update(False)
-            last_scroll_y = None
-            mouse.reset()
-
-        elif hands:
-            landmarks = control_hand(hands)
-            measured = [("hand", landmarks)]
-
-            pause_toggle.update(is_open_palm(landmarks))
-            if pause_toggle.rose:
-                paused = not paused
-
-            if paused:
-                mode = "PAUSED"
+            measured = []
+            if archery is not None:
+                grip_hand, string_hand = archery
+                nocked = (
+                    palm_center(grip_hand),
+                    pinch_point(string_hand),
+                    hand_scale(grip_hand),
+                )
+                bow.draw(frame, *nocked)
+                if overlay.available and overlay_on:
+                    pose = geometry.map_pose(*nocked)
+                    screen_bow.draw(overlay.canvas, *pose)
+                    overlay.mark(geometry.pose_bounds(*pose))
+                mode = "DRAWING BOW"
+                measured = [("grip", grip_hand), ("string", string_hand)]
+                # The mouse deliberately sits idle: the string hand is pinching,
+                # which would otherwise read as a click.
+                for detector in (pause_toggle, left_click, right_click):
+                    detector.update(False)
                 last_scroll_y = None
-                left_click.update(False)
-                right_click.update(False)
                 mouse.reset()
 
-            elif is_two_fingers_up(landmarks):
-                mode = "SCROLL"
-                palm_y = palm_center(landmarks)[1]
-                if last_scroll_y is None:
-                    last_scroll_y = palm_y
-                else:
-                    delta = last_scroll_y - palm_y
-                    if abs(delta) > SCROLL_DEADZONE_PX:
-                        mouse.scroll(int(delta * SCROLL_GAIN))
+            elif hands:
+                landmarks = control_hand(hands)
+                measured = [("hand", landmarks)]
+
+                pause_toggle.update(is_open_palm(landmarks))
+                if pause_toggle.rose:
+                    paused = not paused
+
+                if paused:
+                    mode = "PAUSED"
+                    last_scroll_y = None
+                    left_click.update(False)
+                    right_click.update(False)
+                    mouse.reset()
+
+                elif is_two_fingers_up(landmarks):
+                    mode = "SCROLL"
+                    palm_y = palm_center(landmarks)[1]
+                    if last_scroll_y is None:
                         last_scroll_y = palm_y
-                left_click.update(False)
-                right_click.update(False)
-                mouse.reset()
+                    else:
+                        delta = last_scroll_y - palm_y
+                        if abs(delta) > SCROLL_DEADZONE_PX:
+                            mouse.scroll(int(delta * SCROLL_GAIN))
+                            last_scroll_y = palm_y
+                    left_click.update(False)
+                    right_click.update(False)
+                    mouse.reset()
+
+                else:
+                    mode = "ACTIVE"
+                    last_scroll_y = None
+                    mouse.move_to(*palm_center(landmarks))
+
+                    middle = is_middle_pinch(landmarks)
+                    right_click.update(middle)
+                    # The index tip drifts close to the thumb during a middle pinch,
+                    # so a plain is_pinch would fire a left click at the same time.
+                    left_click.update(is_pinch(landmarks) and not middle)
+
+                    if right_click.rose:
+                        mouse.right_click()
+                    if left_click.rose:
+                        mouse.click()
 
             else:
-                mode = "ACTIVE"
+                mode = "PAUSED" if paused else "NO HAND"
                 last_scroll_y = None
-                mouse.move_to(*palm_center(landmarks))
+                for detector in (pause_toggle, left_click, right_click):
+                    detector.update(False)
+                mouse.reset()
 
-                middle = is_middle_pinch(landmarks)
-                right_click.update(middle)
-                # The index tip drifts close to the thumb during a middle pinch,
-                # so a plain is_pinch would fire a left click at the same time.
-                left_click.update(is_pinch(landmarks) and not middle)
+            # Drawn here rather than inside detection because only now is the mode
+            # known — and the bow pose wants the frame to itself. Being after the
+            # bow also puts the skeleton under the arrows instead of over them.
+            if show_skeleton and mode != "DRAWING BOW":
+                for landmarks in hands:
+                    tracker.draw_landmarks(frame, landmarks)
 
-                if right_click.rose:
-                    mouse.right_click()
-                if left_click.rose:
-                    mouse.click()
+            bow.update(frame)
 
-        else:
-            mode = "PAUSED" if paused else "NO HAND"
-            last_scroll_y = None
-            for detector in (pause_toggle, left_click, right_click):
-                detector.update(False)
-            mouse.reset()
+            overlay_started = time.perf_counter()
+            if overlay.available:
+                if overlay_on:
+                    screen_bow.update(overlay.canvas)
+                    overlay.mark(arrow_bounds(screen_bow.arrows))
+                # Committed even when switched off, so the last bow drawn gets
+                # erased instead of staying burned onto the desktop.
+                overlay.commit()
+                resized = overlay.poll(time.monotonic())
+                if resized is not None:
+                    mouse, overlay, geometry, screen_bow = rebuild_for_screen(
+                        overlay, resized, frame_width, frame_height
+                    )
+            timer.record("ovl", time.perf_counter() - overlay_started)
 
-        # Drawn here rather than inside detection because only now is the mode
-        # known — and the bow pose wants the frame to itself. Being after the
-        # bow also puts the skeleton under the arrows instead of over them.
-        if show_skeleton and mode != "DRAWING BOW":
-            for landmarks in hands:
-                tracker.draw_landmarks(frame, landmarks)
+            draw_hud(
+                frame,
+                mode,
+                timer.summary() if show_stats else None,
+                metrics_readout(measured, nocked if archery else None,
+                                overlay if overlay_on else None, geometry)
+                if show_metrics
+                else None,
+            )
 
-        bow.update(frame)
-        draw_hud(
-            frame,
-            mode,
-            timer.summary() if show_stats else None,
-            metrics_readout(measured, nocked if archery else None)
-            if show_metrics
-            else None,
-        )
+            cv2.imshow(WINDOW_NAME, frame)
+            key = cv2.waitKey(1) & 0xFF
+            timer.record("ui", time.perf_counter() - draw_started)
 
-        cv2.imshow(WINDOW_NAME, frame)
-        key = cv2.waitKey(1) & 0xFF
-        timer.record("ui", time.perf_counter() - draw_started)
+            if key == ord("q"):
+                break
+            if key == ord("d"):
+                show_stats = not show_stats
+            if key == ord("s"):
+                show_skeleton = not show_skeleton
+            if key == ord("t"):
+                show_metrics = not show_metrics
+            if key == ord("o"):
+                overlay_on = not overlay_on
 
-        if key == ord("q"):
-            break
-        if key == ord("d"):
-            show_stats = not show_stats
-        if key == ord("s"):
-            show_skeleton = not show_skeleton
-        if key == ord("t"):
-            show_metrics = not show_metrics
-
-    cap.release()
-    cv2.destroyAllWindows()
+    finally:
+        # Runs even if the loop raises. Before this, an exception mid-loop left
+        # the camera held and — now — a fullscreen window on the desktop.
+        overlay.close()
+        cap.release()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ Keys, in the camera window:
 | `d` | FPS and per-stage timing readout |
 | `s` | Hand skeleton overlay (hidden automatically while the bow is drawn) |
 | `t` | Tuning readout — the raw numbers each gesture is being decided on |
+| `o` | Desktop overlay on/off |
 
 The `t` readout exists because a gesture that fails to fire looks identical to
 one that was never made. It shows each finger's extended/curled ratio against
@@ -54,6 +55,19 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Flat open palm | Toggle pause, so you can rest or reposition your hand |
 | Fist + OK sign, two hands | Draw the bow |
 
+### The desktop overlay
+
+The bow is drawn twice: once into the camera window, and once onto a
+transparent, click-through window covering the desktop, so it is drawn over
+whatever you are actually looking at. Clicks pass straight through it.
+
+This session is GNOME on Wayland, where a client cannot ask to be always on top
+or click-through at all — Mutter implements no layer-shell protocol, and the
+only surface it offers a client is an ordinary toplevel. The overlay therefore
+goes through XWayland: an override-redirect ARGB window with an empty `SHAPE`
+input region, which is the one combination that stacks above everything and
+swallows no input.
+
 ### The bow
 
 The archery pose is the steppe **thumb draw**: a closed fist grips the bow while
@@ -73,6 +87,7 @@ never loose an arrow by accident.
 - `gesture_state.py` — debounced edge detection, so actions fire once per gesture
 - `mouse_control.py` — maps hand position/gestures to mouse move, click and scroll
 - `animations.py` — the procedurally drawn bow and its arrows
+- `desktop_overlay.py` — the transparent click-through window the bow is drawn on
 - `tests/` — unit tests
 
 ## Roadmap
@@ -82,7 +97,7 @@ never loose an arrow by accident.
 - [x] Pinch gesture triggers a click
 - [x] Special gesture triggers an animation overlay
 - [x] More gestures (right click, scroll, pause)
-- [ ] Draw the animation over the desktop itself, not just the camera window
+- [x] Draw the animation over the desktop itself, not just the camera window
 - [ ] More gestures (volume, media control, ...)
 
 ## How this was built

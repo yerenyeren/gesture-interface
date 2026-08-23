@@ -1,3 +1,6 @@
+import numpy as np
+import pytest
+
 from animations import (
     Arrow,
     HorseBow,
@@ -5,8 +8,14 @@ from animations import (
     draw_ratio,
     transform_points,
     BOW_HALF_LENGTH,
+    BOW_COLOR,
+    BOW_HIGHLIGHT,
+    FLETCHING_COLOR,
+    HEAD_COLOR,
     MAX_DRAW,
     MIN_DRAW,
+    SHAFT_COLOR,
+    STRING_COLOR,
 )
 
 
@@ -141,3 +150,75 @@ def test_draw_ratio_grows_with_the_draw_length():
     long = draw_ratio((100 + int(MAX_DRAW * scale * 0.75), 200), nock, scale)
 
     assert 0.0 < short < long < 1.0
+
+
+def test_colours_carry_an_explicit_alpha():
+    # OpenCV's colour argument is a four-component scalar. A 3-tuple against the
+    # 4-channel overlay canvas would leave alpha at 0 and draw nothing at all,
+    # while looking perfectly correct in the source.
+    for colour in (BOW_COLOR, BOW_HIGHLIGHT, STRING_COLOR, SHAFT_COLOR,
+                   HEAD_COLOR, FLETCHING_COLOR):
+        assert len(colour) == 4
+        assert colour[3] == 255
+
+
+def test_speed_scale_multiplies_the_arrow_speed():
+    """ARROW_MIN_SPEED/ARROW_MAX_SPEED are the only absolute-pixel quantities
+    in the module, so a bow drawn at desktop size would fire arrows that crawl
+    unless their speed is scaled alongside it."""
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(MAX_DRAW * scale), 200)
+
+    plain, scaled = HorseBow(), HorseBow(speed_scale=3.0)
+    plain.loose(grip, nock, scale)
+    scaled.loose(grip, nock, scale)
+
+    assert scaled.arrows[0].vx == pytest.approx(plain.arrows[0].vx * 3.0)
+
+
+def test_speed_scale_defaults_to_leaving_the_speed_alone():
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(MAX_DRAW * scale), 200)
+
+    default, explicit = HorseBow(), HorseBow(speed_scale=1.0)
+    default.loose(grip, nock, scale)
+    explicit.loose(grip, nock, scale)
+
+    assert default.arrows[0].vx == explicit.arrows[0].vx
+
+
+def test_drawing_on_a_four_channel_canvas_keeps_its_alpha():
+    """The overlay canvas is BGRA. If a colour constant lost its fourth
+    component the bow would draw perfectly and be completely invisible."""
+    canvas = np.zeros((600, 600, 4), np.uint8)
+
+    HorseBow().draw(canvas, (300, 300), (150, 300), 40.0)
+
+    assert canvas[:, :, 3].max() == 255
+    opaque = canvas[:, :, 3] == 255
+    assert opaque.sum() > 0
+
+
+def test_the_streak_is_the_distance_covered_in_one_frame():
+    """A motion smear is how far the thing moved, so the streak has to follow
+    speed. Tying it to the shaft length instead made it as long as the whole
+    arrow, which at desktop scale read as a tail hanging off the fletching."""
+    bow = HorseBow()
+    nock, scale = (100, 200), 50.0
+    bow.loose((100 + int(MAX_DRAW * scale), 200), nock, scale)
+
+    arrow = bow.arrows[0]
+    assert arrow.speed == pytest.approx(abs(arrow.vx))
+    assert arrow.reach > arrow.length + arrow.speed  # plus the stroke width
+    # And the streak is a modest fraction of the arrow, not a second arrow.
+    assert arrow.speed < arrow.length * 0.6
+
+
+def test_reach_grows_with_speed_scale():
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(MAX_DRAW * scale), 200)
+    plain, scaled = HorseBow(), HorseBow(speed_scale=3.0)
+    plain.loose(grip, nock, scale)
+    scaled.loose(grip, nock, scale)
+
+    assert scaled.arrows[0].reach > plain.arrows[0].reach

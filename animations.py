@@ -11,13 +11,17 @@ import math
 import cv2
 import numpy as np
 
-# Colours are BGR, matching OpenCV.
-BOW_COLOR = (32, 78, 140)  # dark horn-and-sinew brown
-BOW_HIGHLIGHT = (60, 140, 220)  # lacquered highlight along the limb
-STRING_COLOR = (225, 235, 245)
-SHAFT_COLOR = (150, 200, 235)
-HEAD_COLOR = (215, 235, 250)
-FLETCHING_COLOR = (70, 90, 225)
+# Colours are BGRA, matching OpenCV. The alpha is carried explicitly because
+# OpenCV's colour argument is always a four-component scalar: on the 3-channel
+# camera frame the fourth component is ignored, but on a 4-channel BGRA overlay
+# canvas a 3-tuple would leave alpha at 0 and draw the stroke invisible. One set
+# of constants therefore serves both surfaces.
+BOW_COLOR = (32, 78, 140, 255)  # dark horn-and-sinew brown
+BOW_HIGHLIGHT = (60, 140, 220, 255)  # lacquered highlight along the limb
+STRING_COLOR = (225, 235, 245, 255)
+SHAFT_COLOR = (150, 200, 235, 255)
+HEAD_COLOR = (215, 235, 250, 255)
+FLETCHING_COLOR = (70, 90, 225, 255)
 
 # Sizes below are multiples of the grip hand's `hand_scale`, so the bow is drawn
 # proportional to the hand rather than to a fixed pixel count.
@@ -222,16 +226,35 @@ class Arrow:
             and -margin <= self.y <= frame_height + margin
         )
 
+    @property
+    def speed(self):
+        return math.hypot(self.vx, self.vy)
+
+    @property
+    def reach(self):
+        """How far the drawing extends behind the tip: shaft plus streak.
+
+        Callers that have to know where an arrow put ink — the desktop overlay,
+        which pushes only what changed — need this rather than `length`, since
+        the arrow is drawn entirely behind the point it reports.
+        """
+        # The stroke has width, and it scales with the arrow, so a fixed margin
+        # would stop covering it once the bow is drawn big enough.
+        return self.length + self.speed + max(2, int(self.length * 0.018))
+
     def draw(self, frame):
         direction = _normalize((self.vx, self.vy))
         thickness = max(2, int(self.length * 0.018))
 
-        # A faint streak behind the nock sells the speed.
+        # A faint streak behind the nock sells the speed. Its length is the
+        # distance covered in one frame, which is what a motion smear physically
+        # is — and unlike a fraction of the shaft it actually varies with speed,
+        # and stays proportionate when the whole bow is drawn at desktop scale.
         tail = (
             self.x - direction[0] * self.length,
             self.y - direction[1] * self.length,
         )
-        streak = (tail[0] - direction[0] * self.length, tail[1] - direction[1] * self.length)
+        streak = (tail[0] - direction[0] * self.speed, tail[1] - direction[1] * self.speed)
         cv2.line(
             frame,
             (int(tail[0]), int(tail[1])),
@@ -252,8 +275,13 @@ class HorseBow:
     in flight moving after the pose has broken.
     """
 
-    def __init__(self):
+    def __init__(self, speed_scale=1.0):
         self.arrows = []
+        # ARROW_MIN_SPEED/ARROW_MAX_SPEED are the only quantities in this module
+        # counted in absolute pixels rather than hand scales, so a bow drawn at
+        # desktop size would fire arrows that crawl. Scaling them alongside the
+        # bow is what keeps the shot looking the same on either surface.
+        self.speed_scale = speed_scale
 
     @staticmethod
     def _aim(grip, nock):
@@ -317,7 +345,8 @@ class HorseBow:
 
         aim = self._aim(grip, nock)
         power = draw_ratio(grip, nock, scale)
-        speed = ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED)
+        speed = (ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED))
+        speed *= self.speed_scale
         length = _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
 
         self.arrows.append(Arrow(nock, (aim[0] * speed, aim[1] * speed), length))
