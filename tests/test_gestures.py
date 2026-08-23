@@ -1,6 +1,7 @@
 import math
 
 from gestures import (
+    gesture_metrics,
     is_fist,
     is_middle_pinch,
     is_ok_sign,
@@ -10,12 +11,14 @@ from gestures import (
     hand_scale,
     palm_center,
     pinch_point,
+    pinch_threshold,
     FINGERS,
     FINGER_CURLED_RATIO,
     FINGER_EXTENDED_RATIO,
     MIDDLE_MCP,
+    MIDDLE_TIP,
     PALM_LANDMARKS,
-    PINCH_THRESHOLD_PX,
+    PINCH_RATIO,
     THUMB_TIP,
     INDEX_TIP,
     WRIST,
@@ -28,13 +31,26 @@ PIP_OFFSET = 120
 # can be placed on one without touching its neighbour.
 FINGER_ANGLES = (-0.525, -0.175, 0.175, 0.525)
 
+# The pinch threshold is a fraction of the hand scale, so a hand under test has
+# to have one. 80px was picked because 0.55 x 80 lands on a whole 44px, which
+# keeps the boundary tests below exact rather than fighting float rounding.
+HAND_SCALE_PX = 80
+PINCH_PX = PINCH_RATIO * HAND_SCALE_PX
+
 # Tip-to-PIP distance ratios comfortably either side of the two thresholds.
 EXTENDED = FINGER_EXTENDED_RATIO + 0.25
 CURLED = FINGER_CURLED_RATIO - 0.3
 
 
-def _landmarks(thumb, index):
-    landmarks = [(0, 0)] * 9
+def _landmarks(thumb, index, scale=HAND_SCALE_PX):
+    """A minimal hand: just a thumb, an index tip, and a wrist-to-knuckle scale.
+
+    The scale has to be here because the pinch threshold is measured against
+    `hand_scale`, not against a fixed pixel count.
+    """
+    landmarks = [(0, 0)] * 21
+    landmarks[WRIST] = (0, 0)
+    landmarks[MIDDLE_MCP] = (0, -scale)
     landmarks[THUMB_TIP] = thumb
     landmarks[INDEX_TIP] = index
     return landmarks
@@ -82,15 +98,30 @@ def test_identical_points_is_pinch():
 
 
 def test_distance_just_under_threshold_is_pinch():
-    assert is_pinch(_landmarks((0, 0), (PINCH_THRESHOLD_PX - 1, 0))) is True
+    assert is_pinch(_landmarks((0, 0), (PINCH_PX - 1, 0))) is True
 
 
 def test_distance_at_threshold_is_not_pinch():
-    assert is_pinch(_landmarks((0, 0), (PINCH_THRESHOLD_PX, 0))) is False
+    assert is_pinch(_landmarks((0, 0), (PINCH_PX, 0))) is False
 
 
 def test_distance_just_over_threshold_is_not_pinch():
-    assert is_pinch(_landmarks((0, 0), (PINCH_THRESHOLD_PX + 1, 0))) is False
+    assert is_pinch(_landmarks((0, 0), (PINCH_PX + 1, 0))) is False
+
+
+def test_pinch_threshold_tracks_the_hand_scale():
+    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=80)) == 44.0
+    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=40)) == 22.0
+
+
+def test_the_same_pose_pinches_at_any_camera_distance():
+    """The whole point of a ratio: a pinch must not depend on how close the
+    hand is to the camera. The same gesture is built at two scales, with every
+    distance scaled alike, and has to read the same both times."""
+    for scale, gap in ((80, 20), (40, 10)):
+        assert is_pinch(_landmarks((0, 0), (gap, 0), scale=scale)) is True
+    for scale, gap in ((80, 60), (40, 30)):
+        assert is_pinch(_landmarks((0, 0), (gap, 0), scale=scale)) is False
 
 
 def test_negative_coordinates_use_absolute_distance():
@@ -181,3 +212,48 @@ def test_hand_scale_measures_wrist_to_middle_knuckle():
     landmarks[MIDDLE_MCP] = (130, 140)
 
     assert hand_scale(landmarks) == 50.0
+
+
+def test_gesture_metrics_agree_with_the_predicates_they_explain():
+    """The readout has to be gating on exactly what the predicates gate on. A
+    parallel calculation that drifted would make the tuning HUD actively
+    misleading, which is worse than having none."""
+    for landmarks in (
+        _hand(),
+        _hand(CURLED, CURLED, CURLED, CURLED),
+        _hand(ring=CURLED, pinky=CURLED),
+        _pinched(_hand(index=CURLED)),
+    ):
+        metrics = gesture_metrics(landmarks)
+
+        extended = [r > FINGER_EXTENDED_RATIO for r in metrics["ratios"]]
+        curled = [r < FINGER_CURLED_RATIO for r in metrics["ratios"]]
+        assert all(extended) is is_open_palm(landmarks)
+        assert all(curled) is is_fist(landmarks)
+
+        threshold = metrics["pinch_threshold_px"]
+        assert (metrics["index_pinch_px"] < threshold) is is_pinch(landmarks)
+        assert (metrics["middle_pinch_px"] < threshold) is is_middle_pinch(landmarks)
+
+
+def test_gesture_metrics_reports_the_dead_band_between_the_thresholds():
+    """A finger sitting between the two ratios is neither extended nor curled,
+    so every gesture using it silently fails. That state is invisible in the
+    booleans and is the reason the metrics exist."""
+    midway = (FINGER_EXTENDED_RATIO + FINGER_CURLED_RATIO) / 2
+    landmarks = _hand(CURLED, CURLED, CURLED, midway)
+
+    pinky_ratio = gesture_metrics(landmarks)["ratios"][3]
+    assert FINGER_CURLED_RATIO < pinky_ratio < FINGER_EXTENDED_RATIO
+    assert is_fist(landmarks) is False
+    assert is_open_palm(landmarks) is False
+
+
+def test_gesture_metrics_measures_both_pinches_independently():
+    landmarks = _hand()
+    landmarks[THUMB_TIP] = landmarks[MIDDLE_TIP]
+    metrics = gesture_metrics(landmarks)
+
+    assert metrics["middle_pinch_px"] == 0.0
+    assert metrics["index_pinch_px"] > metrics["pinch_threshold_px"]
+    assert metrics["scale_px"] == 60.0

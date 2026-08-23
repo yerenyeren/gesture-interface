@@ -2,6 +2,7 @@ from animations import (
     Arrow,
     HorseBow,
     bow_profile,
+    draw_ratio,
     transform_points,
     BOW_HALF_LENGTH,
     MAX_DRAW,
@@ -120,3 +121,23 @@ def test_bow_half_length_is_expressed_in_hand_scales():
     # from the camera rather than sitting at a fixed pixel size.
     assert BOW_HALF_LENGTH > 0
     assert MIN_DRAW < MAX_DRAW
+
+
+def test_draw_ratio_is_zero_for_a_scaleless_hand():
+    # Guards the division: a degenerate hand must not blow the geometry up.
+    assert draw_ratio((300, 200), (100, 200), 0.0) == 0.0
+
+
+def test_draw_ratio_clamps_at_a_full_draw():
+    scale = 50.0
+    beyond_full = (100 + int(MAX_DRAW * scale) + 200, 200)
+
+    assert draw_ratio(beyond_full, (100, 200), scale) == 1.0
+
+
+def test_draw_ratio_grows_with_the_draw_length():
+    scale, nock = 50.0, (100, 200)
+    short = draw_ratio((100 + int(MIN_DRAW * scale), 200), nock, scale)
+    long = draw_ratio((100 + int(MAX_DRAW * scale * 0.75), 200), nock, scale)
+
+    assert 0.0 < short < long < 1.0

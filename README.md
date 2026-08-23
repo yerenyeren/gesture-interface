@@ -26,9 +26,20 @@ To run the unit tests:
 venv/bin/python -m pytest tests/ -v
 ```
 
-Press `q` in the camera window to quit, `d` to toggle the FPS and per-stage
-timing readout, or `s` to toggle the hand skeleton — which hides itself while
-the bow is drawn either way.
+Keys, in the camera window:
+
+| Key | Does |
+| --- | --- |
+| `q` | Quit |
+| `d` | FPS and per-stage timing readout |
+| `s` | Hand skeleton overlay (hidden automatically while the bow is drawn) |
+| `t` | Tuning readout — the raw numbers each gesture is being decided on |
+
+The `t` readout exists because a gesture that fails to fire looks identical to
+one that was never made. It shows each finger's extended/curled ratio against
+the thresholds, both pinch distances against the threshold for that hand, and
+the draw length while the bow is drawn — so a threshold can be moved against a
+reading rather than a guess.
 
 ## Gestures
 

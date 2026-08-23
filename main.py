@@ -1,10 +1,12 @@
+import math
 import time
 
 import cv2
 
-from animations import HorseBow
+from animations import HorseBow, draw_ratio, MAX_DRAW, MIN_DRAW
 from gesture_state import EdgeDetector
 from gestures import (
+    gesture_metrics,
     hand_scale,
     is_fist,
     is_middle_pinch,
@@ -14,6 +16,8 @@ from gestures import (
     is_two_fingers_up,
     palm_center,
     pinch_point,
+    FINGER_CURLED_RATIO,
+    FINGER_EXTENDED_RATIO,
 )
 from hand_tracker import HandTracker
 from mouse_control import MouseController
@@ -21,6 +25,18 @@ from mouse_control import MouseController
 SCROLL_DEADZONE_PX = 12
 SCROLL_GAIN = 0.4
 HUD_COLOR = (240, 240, 240)
+HUD_FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+# A finger between the two ratios is neither extended nor curled, so every
+# gesture that uses it silently fails to fire. That state has no boolean of its
+# own, which is exactly why the tuning readout gives it a colour and a mark.
+FINGER_MARKS = {"extended": "^", "curled": "v", "dead": "?"}
+FINGER_STATE_COLORS = {
+    "extended": (140, 240, 140),
+    "curled": (150, 200, 255),
+    "dead": (90, 90, 255),
+}
+FINGER_NAMES = ("I", "M", "R", "P")
 
 WINDOW_NAME = "Gesture Interface"
 
@@ -125,17 +141,87 @@ def control_hand(hands):
     return max(hands, key=lambda landmarks: palm_center(landmarks)[0])
 
 
-def draw_hud(frame, mode, stats=None):
-    lines = [(mode, 0.8, 34, 5, 2)]
-    if stats is not None:
-        lines.append((stats, 0.5, 62, 3, 1))
+def finger_state(ratio):
+    """Which of the three states a finger ratio falls in."""
+    if ratio > FINGER_EXTENDED_RATIO:
+        return "extended"
+    if ratio < FINGER_CURLED_RATIO:
+        return "curled"
+    return "dead"
 
-    for text, scale, y, outline, weight in lines:
-        for color, thickness in (((0, 0, 0), outline), (HUD_COLOR, weight)):
-            cv2.putText(
-                frame, text, (14, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color,
-                thickness, cv2.LINE_AA,
+
+def metric_segments(label, landmarks):
+    """Two lines of (text, colour) runs describing what the predicates see.
+
+    Returned as runs rather than strings so each finger can be coloured by its
+    own state — the numbers alone do not show which side of a threshold they
+    fell on, and that is the whole reason for looking at them.
+    """
+    metrics = gesture_metrics(landmarks)
+    threshold = metrics["pinch_threshold_px"]
+
+    ratios = [(f"{label:<7}", HUD_COLOR)]
+    for name, ratio in zip(FINGER_NAMES, metrics["ratios"]):
+        state = finger_state(ratio)
+        ratios.append(
+            (f"{name} {ratio:.2f}{FINGER_MARKS[state]}  ", FINGER_STATE_COLORS[state])
+        )
+
+    pinch = [
+        (" " * 7, HUD_COLOR),
+        (
+            f"pinch idx {metrics['index_pinch_px']:.0f}  mid "
+            f"{metrics['middle_pinch_px']:.0f}  < {threshold:.0f}   "
+            f"scale {metrics['scale_px']:.0f}px",
+            HUD_COLOR,
+        ),
+    ]
+    return [ratios, pinch]
+
+
+def metrics_readout(measured, nocked):
+    """Tuning lines for the hands in play, plus the draw length when drawing."""
+    lines = []
+    for label, landmarks in measured:
+        lines.extend(metric_segments(label, landmarks))
+
+    if nocked is not None:
+        grip, nock, scale = nocked
+        length = math.hypot(grip[0] - nock[0], grip[1] - nock[1]) / scale if scale else 0
+        lines.append([
+            (
+                f"{'draw':<7}{length:.2f}x hand   ratio "
+                f"{draw_ratio(grip, nock, scale):.2f}   "
+                f"loose > {MIN_DRAW}   full at {MAX_DRAW}",
+                HUD_COLOR,
             )
+        ])
+    return lines
+
+
+def draw_hud(frame, mode, stats=None, metrics=None):
+    """Mode, optional timings, and optional per-hand tuning numbers."""
+    y = 34
+    _draw_runs(frame, [(mode, HUD_COLOR)], y, scale=0.8, outline=5, weight=2)
+
+    y += 28
+    if stats is not None:
+        _draw_runs(frame, [(stats, HUD_COLOR)], y)
+        y += 20
+
+    for runs in metrics or ():
+        _draw_runs(frame, runs, y)
+        y += 20
+
+
+def _draw_runs(frame, runs, y, scale=0.5, outline=3, weight=1):
+    x = 14
+    for text, color in runs:
+        for shade, thickness in (((0, 0, 0), outline), (color, weight)):
+            cv2.putText(
+                frame, text, (x, y), HUD_FONT, scale, shade, thickness, cv2.LINE_AA,
+            )
+        x += cv2.getTextSize(text, HUD_FONT, scale, weight)[0][0]
 
 
 def main():
@@ -163,6 +249,7 @@ def main():
     paused = False
     show_stats = True
     show_skeleton = True
+    show_metrics = False
     last_scroll_y = None
     nocked = None  # (grip, nock, scale) from the most recent archery frame
 
@@ -192,6 +279,7 @@ def main():
             bow.loose(*nocked)
             nocked = None
 
+        measured = []
         if archery is not None:
             grip_hand, string_hand = archery
             nocked = (
@@ -201,6 +289,7 @@ def main():
             )
             bow.draw(frame, *nocked)
             mode = "DRAWING BOW"
+            measured = [("grip", grip_hand), ("string", string_hand)]
             # The mouse deliberately sits idle: the string hand is pinching,
             # which would otherwise read as a click.
             for detector in (pause_toggle, left_click, right_click):
@@ -210,6 +299,7 @@ def main():
 
         elif hands:
             landmarks = control_hand(hands)
+            measured = [("hand", landmarks)]
 
             pause_toggle.update(is_open_palm(landmarks))
             if pause_toggle.rose:
@@ -267,7 +357,14 @@ def main():
                 tracker.draw_landmarks(frame, landmarks)
 
         bow.update(frame)
-        draw_hud(frame, mode, timer.summary() if show_stats else None)
+        draw_hud(
+            frame,
+            mode,
+            timer.summary() if show_stats else None,
+            metrics_readout(measured, nocked if archery else None)
+            if show_metrics
+            else None,
+        )
 
         cv2.imshow(WINDOW_NAME, frame)
         key = cv2.waitKey(1) & 0xFF
@@ -279,6 +376,8 @@ def main():
             show_stats = not show_stats
         if key == ord("s"):
             show_skeleton = not show_skeleton
+        if key == ord("t"):
+            show_metrics = not show_metrics
 
     cap.release()
     cv2.destroyAllWindows()

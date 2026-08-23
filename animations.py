@@ -72,9 +72,9 @@ def _normalize(vector):
     return (x / length, y / length)
 
 
-def bow_profile(draw_ratio):
+def bow_profile(ratio):
     """Control points of the upper half-limb at the given draw (0.0 to 1.0)."""
-    t = min(1.0, max(0.0, draw_ratio))
+    t = min(1.0, max(0.0, ratio))
     return [
         (bx + (dx - bx) * t, by + (dy - by) * t)
         for (bx, by), (dx, dy) in zip(BRACED_PROFILE, DRAWN_PROFILE)
@@ -110,7 +110,19 @@ def _catmull_rom(points, samples_per_segment=8):
     return curve
 
 
-def limb_sections(draw_ratio):
+def draw_ratio(grip, nock, scale):
+    """How far the bow is drawn, 0.0 to 1.0, as a fraction of a full draw.
+
+    `MIN_DRAW` and `MAX_DRAW` are both expressed against this, so it is the one
+    number that decides whether a shot counts at all and how fast the arrow
+    leaves — which is why it is readable from outside the bow.
+    """
+    if scale <= 0:
+        return 0.0
+    return min(1.0, _dist(grip, nock) / (MAX_DRAW * scale))
+
+
+def limb_sections(ratio):
     """The upper limb split into (working_lath, siyah), in bow-space.
 
     The lath is smoothed into a curve because it bends; the siyah is left as
@@ -118,7 +130,7 @@ def limb_sections(draw_ratio):
     them separately is what makes the reflexed tip read as a hook rather than as
     one more bend in a bent stick.
     """
-    profile = bow_profile(draw_ratio)
+    profile = bow_profile(ratio)
     lath = _catmull_rom(profile[:WORKING_LIMB_POINTS])
     siyah = profile[WORKING_LIMB_POINTS - 1 :]
     return lath, siyah
@@ -247,21 +259,15 @@ class HorseBow:
     def _aim(grip, nock):
         return _normalize((grip[0] - nock[0], grip[1] - nock[1]))
 
-    @staticmethod
-    def _draw_ratio(grip, nock, scale):
-        if scale <= 0:
-            return 0.0
-        return min(1.0, _dist(grip, nock) / (MAX_DRAW * scale))
-
     def draw(self, frame, grip, nock, scale):
         if scale <= 0:
             return
 
         aim = self._aim(grip, nock)
         half_length = BOW_HALF_LENGTH * scale
-        draw_ratio = self._draw_ratio(grip, nock, scale)
-        lath, siyah = limb_sections(draw_ratio)
-        shoulder = bow_profile(draw_ratio)[1]
+        ratio = draw_ratio(grip, nock, scale)
+        lath, siyah = limb_sections(ratio)
+        shoulder = bow_profile(ratio)[1]
 
         limb = max(3, int(scale * 0.15))
         ear = max(2, limb * 2 // 3)
@@ -310,7 +316,7 @@ class HorseBow:
             return False
 
         aim = self._aim(grip, nock)
-        power = self._draw_ratio(grip, nock, scale)
+        power = draw_ratio(grip, nock, scale)
         speed = ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED)
         length = _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
 

@@ -16,7 +16,11 @@ PINKY_MCP = 17
 PINKY_PIP = 18
 PINKY_TIP = 20
 
-PINCH_THRESHOLD_PX = 40
+# The pinch distance is a fraction of `hand_scale` rather than a pixel count,
+# for the same reason the finger tests below are ratios: an absolute threshold
+# that works at arm's length is permanently triggered up close. 0.55 reproduces
+# the 40px this used to be at the ~65px hand scale the app was built against.
+PINCH_RATIO = 0.55
 PALM_LANDMARKS = (WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_MCP)
 
 # (tip, pip) for the four non-thumb fingers, in finger order.
@@ -56,13 +60,18 @@ def _finger_curled(landmarks, tip, pip):
     return _finger_ratio(landmarks, tip, pip) < FINGER_CURLED_RATIO
 
 
+def pinch_threshold(landmarks):
+    """How close the thumb has to be, in pixels, for this hand at this distance."""
+    return PINCH_RATIO * hand_scale(landmarks)
+
+
 def is_pinch(landmarks):
-    return _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP]) < PINCH_THRESHOLD_PX
+    return _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP]) < pinch_threshold(landmarks)
 
 
 def is_middle_pinch(landmarks):
     """Thumb against the middle finger — the right-click counterpart to is_pinch."""
-    return _dist(landmarks[THUMB_TIP], landmarks[MIDDLE_TIP]) < PINCH_THRESHOLD_PX
+    return _dist(landmarks[THUMB_TIP], landmarks[MIDDLE_TIP]) < pinch_threshold(landmarks)
 
 
 def is_open_palm(landmarks):
@@ -117,3 +126,19 @@ def hand_scale(landmarks):
     pixels, so they track how close the hand is to the camera.
     """
     return _dist(landmarks[WRIST], landmarks[MIDDLE_MCP])
+
+
+def gesture_metrics(landmarks):
+    """The raw numbers the predicates above are gating on, for the tuning HUD.
+
+    Deliberately built from the same helpers the predicates use: a second,
+    parallel calculation could drift from what actually decides the gesture,
+    which would make the readout worse than useless while tuning.
+    """
+    return {
+        "ratios": [_finger_ratio(landmarks, tip, pip) for tip, pip in FINGERS],
+        "index_pinch_px": _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP]),
+        "middle_pinch_px": _dist(landmarks[THUMB_TIP], landmarks[MIDDLE_TIP]),
+        "pinch_threshold_px": pinch_threshold(landmarks),
+        "scale_px": hand_scale(landmarks),
+    }
