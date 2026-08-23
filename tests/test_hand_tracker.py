@@ -101,3 +101,22 @@ def test_video_timestamps_advance_even_on_a_frozen_clock(
 
     timestamps = [call.args[1] for call in mock_landmarker.detect_for_video.call_args_list]
     assert timestamps == [12345, 12346, 12347, 12348]
+
+
+def test_draw_landmarks_draws_from_pixel_coordinates():
+    """The skeleton is drawn from the same pixel list the gestures are computed
+    from. Rescaling here off frame.shape instead would disagree with the caller
+    whenever the driver hands back a size different from the one it reports."""
+    frame = _frame()
+    points = [(10 * i, 20 * i) for i in range(21)]
+
+    with patch("hand_tracker.cv2") as mock_cv2:
+        HandTracker.draw_landmarks(frame, points)
+
+    assert mock_cv2.line.called
+    assert mock_cv2.circle.call_count == 21
+    # Every circle sits on a point it was handed, untouched.
+    # Passed straight through: had draw_landmarks rescaled by frame.shape, these
+    # would not come back as the coordinates that went in.
+    drawn = [call.args[1] for call in mock_cv2.circle.call_args_list]
+    assert drawn == points

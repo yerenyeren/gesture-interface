@@ -49,16 +49,27 @@ class HandTracker:
         result = self._landmarker.detect_for_video(image, self._next_timestamp_ms())
 
         if draw and result.hand_landmarks:
+            height, width = frame.shape[:2]
             for hand_landmarks in result.hand_landmarks:
-                self._draw_landmarks(frame, hand_landmarks)
+                self.draw_landmarks(
+                    frame, self.landmark_positions(hand_landmarks, width, height)
+                )
 
         return frame, result.hand_landmarks
 
     @staticmethod
-    def _draw_landmarks(frame, hand_landmarks):
-        height, width = frame.shape[:2]
-        points = [(int(lm.x * width), int(lm.y * height)) for lm in hand_landmarks]
+    def draw_landmarks(frame, points):
+        """Draw one hand's skeleton from pixel coordinates.
 
+        Takes the pixel list `landmark_positions` produces rather than raw
+        normalized landmarks, so the skeleton is drawn from exactly the
+        coordinates the gestures are computed from. Scaling here independently —
+        off `frame.shape` — would disagree with the caller whenever the driver
+        hands back a frame size different from the one it reports.
+
+        Public because the caller decides *when* to draw: the mode is not known
+        until after detection, and the bow pose wants a clean frame.
+        """
         for connection in HandLandmarksConnections.HAND_CONNECTIONS:
             cv2.line(frame, points[connection.start], points[connection.end], (0, 255, 0), 2)
         for point in points:

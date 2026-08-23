@@ -162,6 +162,7 @@ def main():
 
     paused = False
     show_stats = True
+    show_skeleton = True
     last_scroll_y = None
     nocked = None  # (grip, nock, scale) from the most recent archery frame
 
@@ -174,7 +175,7 @@ def main():
 
         detect_started = time.perf_counter()
         frame = cv2.flip(frame, 1)
-        frame, raw_hands = tracker.find_hands(frame)
+        frame, raw_hands = tracker.find_hands(frame, draw=False)
         hands = [
             tracker.landmark_positions(hand, frame_width, frame_height)
             for hand in raw_hands
@@ -258,6 +259,13 @@ def main():
                 detector.update(False)
             mouse.reset()
 
+        # Drawn here rather than inside detection because only now is the mode
+        # known — and the bow pose wants the frame to itself. Being after the
+        # bow also puts the skeleton under the arrows instead of over them.
+        if show_skeleton and mode != "DRAWING BOW":
+            for landmarks in hands:
+                tracker.draw_landmarks(frame, landmarks)
+
         bow.update(frame)
         draw_hud(frame, mode, timer.summary() if show_stats else None)
 
@@ -269,6 +277,8 @@ def main():
             break
         if key == ord("d"):
             show_stats = not show_stats
+        if key == ord("s"):
+            show_skeleton = not show_skeleton
 
     cap.release()
     cv2.destroyAllWindows()

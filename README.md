@@ -26,8 +26,9 @@ To run the unit tests:
 venv/bin/python -m pytest tests/ -v
 ```
 
-Press `q` in the camera window to quit, or `d` to toggle the FPS and
-per-stage timing readout.
+Press `q` in the camera window to quit, `d` to toggle the FPS and per-stage
+timing readout, or `s` to toggle the hand skeleton — which hides itself while
+the bow is drawn either way.
 
 ## Gestures
 
