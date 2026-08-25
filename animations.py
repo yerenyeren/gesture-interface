@@ -158,6 +158,17 @@ def transform_points(points, origin, forward, scale):
     ]
 
 
+def _fletching(length):
+    """Feather length, and how far the feathers reach back past the nock.
+
+    Shared with `Arrow.reach` rather than duplicated there: the overhang is the
+    hindmost ink on an arrow, so a second copy of these numbers could drift and
+    leave the tail of the fletching outside the rect the overlay pushes.
+    """
+    fletch = max(7.0, length * 0.11)
+    return fletch, fletch * 0.2
+
+
 def draw_arrow(frame, tip, direction, length, thickness):
     """Draw an arrow whose point is at `tip`, running back along `direction`."""
     dx, dy = direction
@@ -188,7 +199,7 @@ def draw_arrow(frame, tip, direction, length, thickness):
 
     # Fletching as swept-back feathers rather than two straight lines, which at
     # this size read as a second arrowhead pointing the wrong way.
-    fletch_length = max(7.0, length * 0.11)
+    fletch_length, overhang = _fletching(length)
     fletch_width = fletch_length * 0.42
     fletch_base = (tail[0] + dx * fletch_length, tail[1] + dy * fletch_length)
     for side in (1, -1):
@@ -199,8 +210,8 @@ def draw_arrow(frame, tip, direction, length, thickness):
                 (int(tail[0]), int(tail[1])),
                 (int(fletch_base[0]), int(fletch_base[1])),
                 (
-                    int(tail[0] - dx * fletch_length * 0.2 + px * fletch_width * side),
-                    int(tail[1] - dy * fletch_length * 0.2 + py * fletch_width * side),
+                    int(tail[0] - dx * overhang + px * fletch_width * side),
+                    int(tail[1] - dy * overhang + py * fletch_width * side),
                 ),
             ],
             np.int32,
@@ -227,42 +238,22 @@ class Arrow:
         )
 
     @property
-    def speed(self):
-        return math.hypot(self.vx, self.vy)
-
-    @property
     def reach(self):
-        """How far the drawing extends behind the tip: shaft plus streak.
+        """How far the drawing extends behind the tip.
 
         Callers that have to know where an arrow put ink — the desktop overlay,
         which pushes only what changed — need this rather than `length`, since
         the arrow is drawn entirely behind the point it reports.
         """
-        # The stroke has width, and it scales with the arrow, so a fixed margin
-        # would stop covering it once the bow is drawn big enough.
-        return self.length + self.speed + max(2, int(self.length * 0.018))
+        # Ink runs a little past the nock, because the fletching's feathers are
+        # swept back behind it — and every stroke has width. Both scale with the
+        # arrow, so a fixed margin would stop covering them once the bow is
+        # drawn big enough.
+        return self.length + _fletching(self.length)[1] + max(2, int(self.length * 0.018))
 
     def draw(self, frame):
         direction = _normalize((self.vx, self.vy))
         thickness = max(2, int(self.length * 0.018))
-
-        # A faint streak behind the nock sells the speed. Its length is the
-        # distance covered in one frame, which is what a motion smear physically
-        # is — and unlike a fraction of the shaft it actually varies with speed,
-        # and stays proportionate when the whole bow is drawn at desktop scale.
-        tail = (
-            self.x - direction[0] * self.length,
-            self.y - direction[1] * self.length,
-        )
-        streak = (tail[0] - direction[0] * self.speed, tail[1] - direction[1] * self.speed)
-        cv2.line(
-            frame,
-            (int(tail[0]), int(tail[1])),
-            (int(streak[0]), int(streak[1])),
-            SHAFT_COLOR,
-            max(1, thickness - 1),
-            cv2.LINE_AA,
-        )
 
         draw_arrow(frame, (self.x, self.y), direction, self.length, thickness)
 

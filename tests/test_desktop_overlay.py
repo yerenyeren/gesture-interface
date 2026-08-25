@@ -62,10 +62,10 @@ def test_arrow_bounds_covers_every_arrow():
     assert (x + width, y + height) == (240, 120)
 
 
-def test_arrow_bounds_covers_the_streak_drawn_behind_the_arrow():
-    """An arrow is drawn entirely behind the point it reports — shaft one length
-    back, speed streak one length back again. Covering only one length leaves
-    the streak on the desktop with nothing ever pushing over it."""
+def test_arrow_bounds_covers_everything_drawn_behind_the_arrow():
+    """An arrow is drawn entirely behind the point it reports — the shaft one
+    length back, the fletching swept a little further. Bounding it by `length`
+    leaves that last ink on the desktop with nothing ever pushing over it."""
     arrow = SimpleNamespace(x=1000, y=500, reach=900)
 
     x, _, width, _ = arrow_bounds([arrow], margin=0)
@@ -302,7 +302,7 @@ def test_every_drawn_pixel_falls_inside_the_rect_that_gets_pushed():
     """The property that actually matters, and the one that caught a real bug:
     anything drawn but not pushed stays burned onto the desktop, because the
     canvas is wiped only where it was pushed. Reasoning about the bow's extent
-    missed the arrow's speed streak; drawing it and looking did not."""
+    missed what was drawn behind the arrow; drawing it and looking did not."""
     import math
 
     from animations import BOW_HALF_LENGTH, HorseBow

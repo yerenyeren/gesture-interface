@@ -55,15 +55,15 @@ def clip_rect(rect, width, height):
 def arrow_bounds(arrows, margin=8):
     """Rect covering arrows in flight, or None.
 
-    Duck-typed on `.x`, `.y` and `.length` rather than importing `animations`,
+    Duck-typed on `.x`, `.y` and `.reach` rather than importing `animations`,
     which keeps this module free of cross-imports.
     """
     if not arrows:
         return None
     # An arrow is drawn entirely *behind* the point it reports — shaft, then
-    # motion streak — so `reach`, not `length`, is what bounds it. Taking that
+    # fletching — so `reach`, not `length`, is what bounds it. Taking that
     # either side covers it whichever way it is flying, and getting it wrong
-    # leaves a streak on the desktop that nothing ever pushes over.
+    # leaves ink on the desktop that nothing ever pushes over.
     reach = [arrow.reach + margin for arrow in arrows]
     x0 = min(arrow.x - r for arrow, r in zip(arrows, reach))
     y0 = min(arrow.y - r for arrow, r in zip(arrows, reach))

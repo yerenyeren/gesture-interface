@@ -199,26 +199,33 @@ def test_drawing_on_a_four_channel_canvas_keeps_its_alpha():
     assert opaque.sum() > 0
 
 
-def test_the_streak_is_the_distance_covered_in_one_frame():
-    """A motion smear is how far the thing moved, so the streak has to follow
-    speed. Tying it to the shaft length instead made it as long as the whole
-    arrow, which at desktop scale read as a tail hanging off the fletching."""
+def test_nothing_is_drawn_behind_the_fletching():
+    """The arrow used to trail a motion streak a full frame's travel behind the
+    nock, which read as a tail hanging off the fletching. The feathers are now
+    the hindmost ink there is, and `reach` still has to cover them — anything
+    drawn outside it is left burned onto the desktop overlay."""
     bow = HorseBow()
     nock, scale = (100, 200), 50.0
     bow.loose((100 + int(MAX_DRAW * scale), 200), nock, scale)
-
     arrow = bow.arrows[0]
-    assert arrow.speed == pytest.approx(abs(arrow.vx))
-    assert arrow.reach > arrow.length + arrow.speed  # plus the stroke width
-    # And the streak is a modest fraction of the arrow, not a second arrow.
-    assert arrow.speed < arrow.length * 0.6
+    # Loosed straight along +x, so distance behind the tip is a column offset.
+    assert arrow.vy == 0 and arrow.vx > 0
+    arrow.x, arrow.y = 400.0, 200.0
+
+    canvas = np.zeros((400, 600, 4), np.uint8)
+    arrow.draw(canvas)
+
+    inked = np.nonzero(canvas.any(axis=2).any(axis=0))[0]
+    behind = 400 - inked.min()
+    assert behind <= arrow.reach
+    # The shaft is `length` long and the feathers sweep a little past its end.
+    # A streak would put ink a whole frame's travel — tens of pixels — further.
+    assert behind < arrow.length * 1.05
 
 
-def test_reach_grows_with_speed_scale():
-    nock, scale = (100, 200), 50.0
-    grip = (100 + int(MAX_DRAW * scale), 200)
-    plain, scaled = HorseBow(), HorseBow(speed_scale=3.0)
-    plain.loose(grip, nock, scale)
-    scaled.loose(grip, nock, scale)
+def test_reach_covers_the_fletching_swept_behind_the_nock():
+    """`reach` bounds what the overlay pushes, so it has to lead `length` by
+    more than the stroke width alone: the feathers hang off the back."""
+    arrow = Arrow((100, 200), (40.0, 0.0), 300.0)
 
-    assert scaled.arrows[0].reach > plain.arrows[0].reach
+    assert arrow.reach > arrow.length + max(2, int(arrow.length * 0.018))
