@@ -35,6 +35,11 @@ Keys, in the camera window:
 | `s` | Hand skeleton overlay (hidden automatically while the bow is drawn) |
 | `t` | Tuning readout — the raw numbers each gesture is being decided on |
 | `o` | Desktop overlay on/off |
+| `p` | Pause — park the cursor without leaving the frame |
+
+Pause is a key and not a gesture. It was a gesture, and a pause that fires
+when it was not asked for takes the cursor away mid-task — the most expensive
+false positive the app has, and not worth the convenience.
 
 The `t` readout exists because a gesture that fails to fire looks identical to
 one that was never made. It shows each finger's extended/curled ratio against
@@ -52,7 +57,6 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Thumb + index pinch | Left click |
 | Thumb + middle pinch | Right click |
 | Index + middle up, ring and pinky down | Scroll — move the hand up or down |
-| Flat open palm | Toggle pause, so you can rest or reposition your hand |
 | Fist + OK sign, two hands | Draw the bow |
 
 ### The desktop overlay
@@ -96,7 +100,7 @@ never loose an arrow by accident.
 - [x] Cursor follows hand position
 - [x] Pinch gesture triggers a click
 - [x] Special gesture triggers an animation overlay
-- [x] More gestures (right click, scroll, pause)
+- [x] More gestures (right click, scroll)
 - [x] Draw the animation over the desktop itself, not just the camera window
 - [ ] More gestures (volume, media control, ...)
 

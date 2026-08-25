@@ -12,7 +12,6 @@ from gestures import (
     is_fist,
     is_middle_pinch,
     is_ok_sign,
-    is_open_palm,
     is_pinch,
     is_two_fingers_up,
     palm_center,
@@ -297,7 +296,6 @@ def main():
     # Actions fire on gesture edges, never on every frame the gesture is held.
     left_click = EdgeDetector()
     right_click = EdgeDetector()
-    pause_toggle = EdgeDetector(min_frames=3)
     at_full_draw = EdgeDetector()
 
     paused = False
@@ -353,7 +351,7 @@ def main():
                 measured = [("grip", grip_hand), ("string", string_hand)]
                 # The mouse deliberately sits idle: the string hand is pinching,
                 # which would otherwise read as a click.
-                for detector in (pause_toggle, left_click, right_click):
+                for detector in (left_click, right_click):
                     detector.update(False)
                 last_scroll_y = None
                 mouse.reset()
@@ -361,10 +359,6 @@ def main():
             elif hands:
                 landmarks = control_hand(hands)
                 measured = [("hand", landmarks)]
-
-                pause_toggle.update(is_open_palm(landmarks))
-                if pause_toggle.rose:
-                    paused = not paused
 
                 if paused:
                     mode = "PAUSED"
@@ -406,7 +400,7 @@ def main():
             else:
                 mode = "PAUSED" if paused else "NO HAND"
                 last_scroll_y = None
-                for detector in (pause_toggle, left_click, right_click):
+                for detector in (left_click, right_click):
                     detector.update(False)
                 mouse.reset()
 
@@ -458,6 +452,12 @@ def main():
                 show_metrics = not show_metrics
             if key == ord("o"):
                 overlay_on = not overlay_on
+            if key == ord("p"):
+                # A key rather than a gesture: a pause that fires when it was
+                # not asked for takes the cursor away, which is the most
+                # expensive false positive the app has.
+                paused = not paused
+                mouse.reset()
 
     finally:
         # Runs even if the loop raises. Before this, an exception mid-loop left
