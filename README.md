@@ -43,9 +43,10 @@ false positive the app has, and not worth the convenience.
 
 The `t` readout exists because a gesture that fails to fire looks identical to
 one that was never made. It shows each finger's extended/curled ratio against
-the thresholds, both pinch distances against the threshold for that hand, and
-the draw length while the bow is drawn — so a threshold can be moved against a
-reading rather than a guess.
+the thresholds, both pinch distances against that hand's enter/release pair
+along with which fingertip currently owns the pinch, and the draw length while
+the bow is drawn — so a threshold can be moved against a reading rather than a
+guess.
 
 ## Gestures
 

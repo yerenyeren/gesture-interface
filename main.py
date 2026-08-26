@@ -18,6 +18,8 @@ from gestures import (
     pinch_point,
     FINGER_CURLED_RATIO,
     FINGER_EXTENDED_RATIO,
+    INDEX_TIP,
+    MIDDLE_TIP,
 )
 from hand_tracker import HandTracker
 from mouse_control import MouseController
@@ -43,6 +45,11 @@ FINGER_STATE_COLORS = {
     "dead": (90, 90, 255),
 }
 FINGER_NAMES = ("I", "M", "R", "P")
+
+# Only one fingertip can be pinching at a time, and which one it is decides
+# left click against right click — so the readout names the winner outright
+# rather than leaving it to be inferred from the two distances.
+PINCH_NAMES = {INDEX_TIP: "idx", MIDDLE_TIP: "mid"}
 
 WINDOW_NAME = "Gesture Interface"
 
@@ -164,7 +171,7 @@ def metric_segments(label, landmarks):
     fell on, and that is the whole reason for looking at them.
     """
     metrics = gesture_metrics(landmarks)
-    threshold = metrics["pinch_threshold_px"]
+    winner = PINCH_NAMES.get(metrics["pinched"], "--")
 
     ratios = [(f"{label:<7}", HUD_COLOR)]
     for name, ratio in zip(FINGER_NAMES, metrics["ratios"]):
@@ -177,7 +184,8 @@ def metric_segments(label, landmarks):
         (" " * 7, HUD_COLOR),
         (
             f"pinch idx {metrics['index_pinch_px']:.0f}  mid "
-            f"{metrics['middle_pinch_px']:.0f}  < {threshold:.0f}   "
+            f"{metrics['middle_pinch_px']:.0f}  < {metrics['pinch_enter_px']:.0f}"
+            f"/{metrics['pinch_release_px']:.0f} [{winner}]   "
             f"scale {metrics['scale_px']:.0f}px",
             HUD_COLOR,
         ),
@@ -386,11 +394,14 @@ def main():
                     last_scroll_y = None
                     mouse.move_to(*palm_center(landmarks))
 
-                    middle = is_middle_pinch(landmarks)
-                    right_click.update(middle)
-                    # The index tip drifts close to the thumb during a middle pinch,
-                    # so a plain is_pinch would fire a left click at the same time.
-                    left_click.update(is_pinch(landmarks) and not middle)
+                    # Each detector's own state picks the threshold, so a held
+                    # click keeps its grip while a new one still has to be
+                    # earned. Which finger is pinching is settled inside
+                    # gestures.py — the two can no longer both be true.
+                    right_click.update(
+                        is_middle_pinch(landmarks, held=right_click.is_on)
+                    )
+                    left_click.update(is_pinch(landmarks, held=left_click.is_on))
 
                     if right_click.rose:
                         mouse.right_click()
