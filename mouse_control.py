@@ -84,6 +84,16 @@ class MouseController:
             and abs(position[1] - self._last_sent[1]) < CURSOR_DEADZONE_PX
         )
 
+    @property
+    def position(self):
+        """The last screen position actually sent, or None before the first move.
+
+        The caller needs it to tell whether a click would land on this app's
+        own window; reading it back from pyautogui would report where the
+        physical mouse is, which is not the same thing.
+        """
+        return self._last_sent
+
     def reset(self):
         """Forget the smoothing state, so the next move_to snaps to its target."""
         self._smoothed = None

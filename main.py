@@ -53,6 +53,14 @@ PINCH_NAMES = {INDEX_TIP: "idx", MIDDLE_TIP: "mid"}
 
 WINDOW_NAME = "Gesture Interface"
 
+# The cursor follows the palm across the whole screen, so it crosses this app's
+# own window constantly, and a gesture click that lands there raises, moves or
+# minimises the very view being used to read the gestures. Clicks over it are
+# dropped instead. OpenCV reports the image area only — the decorations, and
+# the minimise button that makes this worth guarding, sit above it.
+WINDOW_GUARD_MARGIN = 12
+WINDOW_TITLEBAR_PX = 64
+
 # Requested capture format. The camera is free to ignore any of this, which is
 # why the frame size is read back off the capture rather than assumed.
 #
@@ -218,6 +226,35 @@ def _draw_runs(frame, runs, y, scale=0.5, outline=3, weight=1):
         x += cv2.getTextSize(text, HUD_FONT, scale, weight)[0][0]
 
 
+def guarded_window_rect():
+    """The camera window's screen rect, grown to cover its decorations.
+
+    None when the backend will not say — some do not — which the caller reads
+    as "guard nothing" rather than "guard everything": an unreported window
+    should cost a safety net, never a click.
+    """
+    try:
+        x, y, width, height = cv2.getWindowImageRect(WINDOW_NAME)
+    except cv2.error:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return (
+        x - WINDOW_GUARD_MARGIN,
+        y - WINDOW_TITLEBAR_PX,
+        width + 2 * WINDOW_GUARD_MARGIN,
+        height + WINDOW_TITLEBAR_PX + WINDOW_GUARD_MARGIN,
+    )
+
+
+def is_over_window(position, rect):
+    """Would a click at `position` land on the app's own window?"""
+    if position is None or rect is None:
+        return False
+    x, y, width, height = rect
+    return x <= position[0] < x + width and y <= position[1] < y + height
+
+
 def overlay_geometry(mouse, frame_width, frame_height):
     return OverlayGeometry(
         (frame_width, frame_height),
@@ -286,6 +323,13 @@ def main():
     # modal event loop that blocks waitKey — and the gesture cursor right-clicks
     # on this very window, so the app could freeze itself.
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE | cv2.WINDOW_GUI_NORMAL)
+    try:
+        # Keep the readouts legible while tuning. The gesture cursor roams the
+        # whole screen and will otherwise bury this window behind whatever it
+        # lands on, which is precisely when its numbers are wanted.
+        cv2.setWindowProperty(WINDOW_NAME, cv2.WND_PROP_TOPMOST, 1)
+    except cv2.error:
+        pass
 
     tracker = HandTracker(max_hands=2)
     mouse = MouseController(frame_width, frame_height)
@@ -403,10 +447,17 @@ def main():
                     )
                     left_click.update(is_pinch(landmarks, held=left_click.is_on))
 
-                    if right_click.rose:
-                        mouse.right_click()
-                    if left_click.rose:
-                        mouse.click()
+                    if right_click.rose or left_click.rose:
+                        if is_over_window(mouse.position, guarded_window_rect()):
+                            # Say so on the HUD: a click swallowed in silence
+                            # is indistinguishable from one never detected,
+                            # which is the failure this app is hardest to
+                            # debug through.
+                            mode = "ACTIVE - click over own window"
+                        elif right_click.rose:
+                            mouse.right_click()
+                        else:
+                            mouse.click()
 
             else:
                 mode = "PAUSED" if paused else "NO HAND"

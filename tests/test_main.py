@@ -1,9 +1,12 @@
-"""Tests for the pure helpers in main.py — the tuning readout's logic.
+"""Tests for the pure helpers in main.py.
 
-main.py is mostly the capture loop and untestable without a camera, but the
-metrics HUD is what the gesture thresholds get tuned against, so the part that
-decides what it says is worth pinning down.
+main.py is mostly the capture loop and untestable without a camera, but two
+parts of it are worth pinning down: the metrics HUD, which is what the gesture
+thresholds get tuned against, and the guard that keeps a gesture click from
+landing on the app's own window.
 """
+
+from unittest.mock import patch
 
 import main
 from gestures import FINGER_CURLED_RATIO, FINGER_EXTENDED_RATIO
@@ -67,3 +70,50 @@ def test_metrics_readout_only_reports_a_draw_length_while_drawing():
         for line in main.metrics_readout(measured, nocked)
         for text, _ in line
     )
+
+
+def test_a_click_landing_on_the_app_window_is_recognised():
+    """The cursor follows the palm across the whole screen, so it crosses this
+    app's own window constantly. A click there raises or minimises the view the
+    gestures are being read from, which is why those clicks are dropped."""
+    rect = (100, 100, 640, 480)
+
+    assert main.is_over_window((400, 300), rect) is True
+    assert main.is_over_window((100, 100), rect) is True
+
+
+def test_a_click_away_from_the_window_passes():
+    rect = (100, 100, 640, 480)
+
+    assert main.is_over_window((99, 300), rect) is False
+    assert main.is_over_window((740, 300), rect) is False
+    assert main.is_over_window((400, 580), rect) is False
+
+
+def test_an_unknown_window_or_cursor_guards_nothing():
+    """An unreported window should cost the safety net, never the click."""
+    assert main.is_over_window((400, 300), None) is False
+    assert main.is_over_window(None, (100, 100, 640, 480)) is False
+
+
+def test_the_guard_reaches_above_the_image_to_cover_the_title_bar():
+    """The minimise button is in the decorations, which sit outside the rect
+    OpenCV reports — guarding the image alone would miss the button that
+    started this."""
+    with patch("main.cv2") as mock_cv2:
+        mock_cv2.getWindowImageRect.return_value = (100, 200, 640, 480)
+        mock_cv2.error = Exception
+        rect = main.guarded_window_rect()
+
+    x, y, width, height = rect
+    assert y < 200 and x < 100
+    assert main.is_over_window((400, 199), rect) is True
+    assert width >= 640 and height >= 480
+
+
+def test_a_window_the_backend_will_not_report_guards_nothing():
+    with patch("main.cv2") as mock_cv2:
+        mock_cv2.getWindowImageRect.return_value = (0, 0, 0, 0)
+        mock_cv2.error = Exception
+
+        assert main.guarded_window_rect() is None

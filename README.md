@@ -68,6 +68,14 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Index + middle up, ring and pinky down, thumb clear | Scroll — move the hand up or down |
 | Fist + OK sign, two hands | Draw the bow |
 
+The camera window stays on top of other windows, and a gesture click landing on
+it is dropped rather than delivered — the HUD says so when that happens. Both
+exist for the same reason: the cursor follows your palm across the whole
+screen, so it crosses this window constantly, and a click that lands on it
+raises, moves or minimises the very readouts being used to judge the gestures.
+A click swallowed in silence would be indistinguishable from one never
+detected, which is why the HUD names it.
+
 Scroll requires the thumb held clear of the fingertips, which is not fussiness.
 A click pinch barely bends the index finger — it reads right at the extended
 threshold — so a pinch made with the middle finger up and the last two down

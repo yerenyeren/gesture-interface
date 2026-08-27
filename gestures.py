@@ -21,13 +21,20 @@ PINKY_TIP = 20
 # that works at arm's length is permanently triggered up close.
 #
 # Two thresholds, not one, so that entering and leaving a pinch are different
-# distances. With a single threshold a thumb resting on the boundary flickers
-# the click on and off frame by frame. 0.55 reproduces the 40px this used to be
-# at the ~65px hand scale the app was built against, and is kept as the *entry*
-# distance deliberately: tightening it would make clicks harder to land, and it
-# does not buy what it looks like it should — see `pinched_finger`.
-PINCH_ENTER_RATIO = 0.55
-PINCH_RELEASE_RATIO = 0.75
+# distances. With a single threshold a thumb sitting on the boundary flickers
+# the click on and off frame by frame.
+#
+# Both are low because a click fires on a *rising* edge: the pinch has to have
+# released before it can fire again. Set generously, an ordinary relaxed hand —
+# fingers merely near each other, not touching — reads as permanently pinched,
+# the detector never releases, and no click ever fires again. That is felt as
+# "it only clicks if I approach from an open palm", which is exactly what a
+# latched detector does. So entering demands something close to real contact,
+# and the gap above it is the smallest that still absorbs landmark jitter:
+# measured, 0.15 * scale kills the chatter and anything wider only makes the
+# hand open further between clicks for nothing.
+PINCH_ENTER_RATIO = 0.40
+PINCH_RELEASE_RATIO = 0.55
 
 # The fingertips a thumb can pinch. Only the nearest of them ever counts.
 PINCH_TIPS = (INDEX_TIP, MIDDLE_TIP)

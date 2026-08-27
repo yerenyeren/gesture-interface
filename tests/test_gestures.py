@@ -1,5 +1,6 @@
 import math
 
+from gesture_state import EdgeDetector
 from gestures import (
     gesture_metrics,
     is_fist,
@@ -127,13 +128,13 @@ def test_distance_just_over_threshold_is_not_pinch():
 
 
 def test_pinch_threshold_tracks_the_hand_scale():
-    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=80)) == 44.0
-    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=40)) == 22.0
+    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=80)) == 32.0
+    assert pinch_threshold(_landmarks((0, 0), (0, 0), scale=40)) == 16.0
 
 
 def test_the_release_threshold_is_the_looser_of_the_two():
     landmarks = _landmarks((0, 0), (0, 0), scale=80)
-    assert pinch_threshold(landmarks, held=True) == 60.0
+    assert pinch_threshold(landmarks, held=True) == 44.0
     assert pinch_threshold(landmarks, held=True) > pinch_threshold(landmarks)
 
 
@@ -168,6 +169,29 @@ def test_a_held_pinch_survives_drifting_past_the_enter_threshold():
     drifted = _landmarks((0, 0), (IN_THE_DEAD_BAND, 0))
 
     assert is_pinch(drifted, held=True) is True
+
+
+def test_repeated_pinches_each_fire_their_own_click():
+    """Why both thresholds sit as low as they do.
+
+    A click fires on a *rising* edge, so a pinch has to have released before it
+    can fire again. Set generously, a hand merely relaxing between clicks —
+    fingers near each other, not touching — never crosses back out, the
+    detector latches on for good, and every click after the first is lost.
+    That is felt as "it only clicks if I approach from an open palm", which is
+    a latched detector rather than a missed detection.
+    """
+    detector = EdgeDetector(min_frames=1)
+    relaxed = PINCH_RELEASE_PX + 2
+    clicks = 0
+
+    for _ in range(3):
+        for gap in (relaxed, 2, relaxed):
+            landmarks = _landmarks((0, 0), (gap, 0))
+            detector.update(is_pinch(landmarks, held=detector.is_on))
+            clicks += detector.rose
+
+    assert clicks == 3
 
 
 def test_a_pinch_cannot_start_inside_the_release_band():
