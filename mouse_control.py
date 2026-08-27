@@ -38,6 +38,7 @@ class MouseController:
         self.screen_width, self.screen_height = pyautogui.size()
         self._smoothed = None
         self._last_sent = None
+        self._button_down = False
 
     def to_screen(self, x, y):
         """Frame coordinates to screen coordinates, before smoothing or clamping.
@@ -108,8 +109,35 @@ class MouseController:
             min(max(y, 1), self.screen_height - 2),
         )
 
-    def click(self):
-        pyautogui.click()
+    @property
+    def is_pressed(self):
+        return self._button_down
+
+    def press(self):
+        """Hold the left button down. Idempotent.
+
+        A left click is a press held for as long as the pinch is, rather than a
+        complete click on the pinch's leading edge, because that is what a drag
+        is: holding the button while the cursor moves is how text gets
+        highlighted and how anything gets dragged. A quick pinch still reads as
+        an ordinary click, since press and release land a frame or two apart.
+        """
+        if not self._button_down:
+            pyautogui.mouseDown()
+            self._button_down = True
+
+    def release(self):
+        """Let the left button up. Idempotent, and safe to call from anywhere.
+
+        Called on *every* path out of the dragging state — hand lost, paused,
+        scrolling, an exception on the way to the exit — because a left button
+        left down is not a missed click. It is a desktop that keeps selecting
+        everything the cursor touches until the app is killed, and the app owns
+        the cursor, so recovering by hand is awkward.
+        """
+        if self._button_down:
+            pyautogui.mouseUp()
+            self._button_down = False
 
     def right_click(self):
         pyautogui.rightClick()

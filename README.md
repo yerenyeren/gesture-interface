@@ -63,10 +63,20 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Gesture | Action |
 | --- | --- |
 | Hand in view | Cursor follows your palm |
-| Thumb + index pinch | Left click |
+| Thumb + index pinch | Left click — hold it to drag or highlight |
 | Thumb + middle pinch | Right click |
 | Index + middle up, ring and pinky down, thumb clear | Scroll — move the hand up or down |
 | Fist + OK sign, two hands | Draw the bow |
+
+A left pinch holds the button down for as long as the pinch lasts, rather than
+sending a complete click on the way in. A quick pinch is still an ordinary
+click — press and release land a frame apart — but holding one lets the cursor
+drag, which is what highlighting text is. The mode reads `DRAG - button held`
+throughout, so a highlight that failed is distinguishable from one that was
+never asked for. The button is released on every path out of that state,
+including a lost hand and an exception on the way to the exit: a left button
+left down keeps selecting whatever the cursor touches, and the app owns the
+cursor.
 
 The camera window stays on top of other windows, and a gesture click landing on
 it is dropped rather than delivered — the HUD says so when that happens. Both

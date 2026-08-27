@@ -26,13 +26,58 @@ def test_move_to_keeps_edges_just_inside_the_screen(mock_pyautogui):
 
 
 @patch("mouse_control.pyautogui")
-def test_click_calls_pyautogui_click(mock_pyautogui):
+def test_a_press_and_release_is_an_ordinary_click(mock_pyautogui):
+    """A left click is a held press rather than a complete click, so that a
+    pinch held while the hand moves drags — which is how text is highlighted.
+    A quick pinch still lands as a click, press and release a frame apart."""
     mock_pyautogui.size.return_value = (1920, 1080)
     mouse = MouseController(frame_width=640, frame_height=480)
 
-    mouse.click()
+    mouse.press()
+    mouse.release()
 
-    mock_pyautogui.click.assert_called_once_with()
+    mock_pyautogui.mouseDown.assert_called_once_with()
+    mock_pyautogui.mouseUp.assert_called_once_with()
+
+
+@patch("mouse_control.pyautogui")
+def test_pressing_twice_holds_the_button_once(mock_pyautogui):
+    mock_pyautogui.size.return_value = (1920, 1080)
+    mouse = MouseController(frame_width=640, frame_height=480)
+
+    mouse.press()
+    mouse.press()
+
+    assert mouse.is_pressed is True
+    mock_pyautogui.mouseDown.assert_called_once_with()
+
+
+@patch("mouse_control.pyautogui")
+def test_release_is_safe_to_call_without_a_press(mock_pyautogui):
+    """Called on every path out of the dragging state, most of which never
+    pressed anything. A button left down is worse than a lost click: it selects
+    everything the cursor touches until the app is killed."""
+    mock_pyautogui.size.return_value = (1920, 1080)
+    mouse = MouseController(frame_width=640, frame_height=480)
+
+    mouse.release()
+    mouse.release()
+
+    assert mouse.is_pressed is False
+    mock_pyautogui.mouseUp.assert_not_called()
+
+
+@patch("mouse_control.pyautogui")
+def test_a_released_button_can_be_pressed_again(mock_pyautogui):
+    mock_pyautogui.size.return_value = (1920, 1080)
+    mouse = MouseController(frame_width=640, frame_height=480)
+
+    for _ in range(3):
+        mouse.press()
+        mouse.release()
+
+    assert mock_pyautogui.mouseDown.call_count == 3
+    assert mock_pyautogui.mouseUp.call_count == 3
 
 
 @patch("mouse_control.pyautogui")
@@ -43,7 +88,7 @@ def test_right_click_calls_pyautogui_right_click(mock_pyautogui):
     mouse.right_click()
 
     mock_pyautogui.rightClick.assert_called_once_with()
-    mock_pyautogui.click.assert_not_called()
+    mock_pyautogui.mouseDown.assert_not_called()
 
 
 @patch("mouse_control.pyautogui")

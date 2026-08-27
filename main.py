@@ -346,8 +346,15 @@ def main():
     overlay_on = True
 
     # Actions fire on gesture edges, never on every frame the gesture is held.
-    left_click = EdgeDetector()
-    right_click = EdgeDetector()
+    # One frame, not the default two. The frame counter was compensating for a
+    # pinch chattering across a single threshold, which the enter/release pair
+    # in gestures.py now prevents outright — measured, a jittering thumb throws
+    # no spurious edge at min_frames=1. Halving it matters because every edge
+    # costs a frame at 15fps, and a double click is four of them: 533ms of
+    # debounce alone overshot the ~400ms most desktops allow, so a double click
+    # was not slow, it was impossible.
+    left_click = EdgeDetector(min_frames=1)
+    right_click = EdgeDetector(min_frames=1)
     at_full_draw = EdgeDetector()
 
     paused = False
@@ -406,6 +413,7 @@ def main():
                 for detector in (left_click, right_click):
                     detector.update(False)
                 last_scroll_y = None
+                mouse.release()
                 mouse.reset()
 
             elif hands:
@@ -417,6 +425,7 @@ def main():
                     last_scroll_y = None
                     left_click.update(False)
                     right_click.update(False)
+                    mouse.release()
                     mouse.reset()
 
                 elif is_two_fingers_up(landmarks):
@@ -431,6 +440,7 @@ def main():
                             last_scroll_y = palm_y
                     left_click.update(False)
                     right_click.update(False)
+                    mouse.release()
                     mouse.reset()
 
                 else:
@@ -447,6 +457,9 @@ def main():
                     )
                     left_click.update(is_pinch(landmarks, held=left_click.is_on))
 
+                    if left_click.fell:
+                        mouse.release()
+
                     if right_click.rose or left_click.rose:
                         if is_over_window(mouse.position, guarded_window_rect()):
                             # Say so on the HUD: a click swallowed in silence
@@ -457,13 +470,21 @@ def main():
                         elif right_click.rose:
                             mouse.right_click()
                         else:
-                            mouse.click()
+                            mouse.press()
+
+                    if mouse.is_pressed:
+                        # Held pinches need a name of their own. Without one a
+                        # drag in progress looks exactly like ACTIVE, and there
+                        # is no way to tell a highlight that failed from one
+                        # that was never asked for.
+                        mode = "DRAG - button held"
 
             else:
                 mode = "PAUSED" if paused else "NO HAND"
                 last_scroll_y = None
                 for detector in (left_click, right_click):
                     detector.update(False)
+                mouse.release()
                 mouse.reset()
 
             # Drawn here rather than inside detection because only now is the mode
@@ -523,7 +544,10 @@ def main():
 
     finally:
         # Runs even if the loop raises. Before this, an exception mid-loop left
-        # the camera held and — now — a fullscreen window on the desktop.
+        # the camera held and — now — a fullscreen window on the desktop. The
+        # button release is the one that cannot be skipped: exiting mid-drag
+        # would leave the desktop with the left button stuck down.
+        mouse.release()
         overlay.close()
         cap.release()
         cv2.destroyAllWindows()
