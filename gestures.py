@@ -122,6 +122,19 @@ def is_middle_pinch(landmarks, held=False):
     return pinched_finger(landmarks, MIDDLE_TIP if held else None) == MIDDLE_TIP
 
 
+def _thumb_is_pinching(landmarks):
+    """Is the thumb closed on either click fingertip, whichever one?
+
+    Measured against the release threshold — the looser of the two — so the
+    whole hysteresis band counts. A pinch that has drifted past the entry
+    distance but is still being held must not leak out and satisfy some other
+    gesture on the way.
+    """
+    thumb = landmarks[THUMB_TIP]
+    limit = pinch_threshold(landmarks, held=True)
+    return any(_dist(thumb, landmarks[tip]) < limit for tip in PINCH_TIPS)
+
+
 def is_open_palm(landmarks):
     return all(_finger_extended(landmarks, tip, pip) for tip, pip in FINGERS)
 
@@ -131,9 +144,21 @@ def is_fist(landmarks):
 
 
 def is_two_fingers_up(landmarks):
-    """Index and middle up, ring and pinky down — the scroll pose."""
+    """Index and middle up, ring and pinky down — the scroll pose.
+
+    A pinching thumb disqualifies it, and that clause is the whole point. A
+    click pinch barely bends the index: measured on a real hand it hovers right
+    at FINGER_EXTENDED_RATIO, so with the middle finger up and the last two
+    down — an ordinary way to hold a hand while clicking — a pinch satisfies
+    every other test here. The loop resolves scroll before clicks and feeds the
+    click detectors False, so the pinch was being discarded on whichever
+    frames the index happened to read 1.16 rather than 1.14, and firing on the
+    rest. Scrolling with the thumb shut on a fingertip is not a gesture anyone
+    makes; losing half the clicks is not a cost worth paying for it.
+    """
     return (
-        _finger_extended(landmarks, INDEX_TIP, INDEX_PIP)
+        not _thumb_is_pinching(landmarks)
+        and _finger_extended(landmarks, INDEX_TIP, INDEX_PIP)
         and _finger_extended(landmarks, MIDDLE_TIP, MIDDLE_PIP)
         and _finger_curled(landmarks, RING_TIP, RING_PIP)
         and _finger_curled(landmarks, PINKY_TIP, PINKY_PIP)

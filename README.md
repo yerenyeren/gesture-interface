@@ -65,8 +65,15 @@ The mode currently in effect is shown in the top-left of the camera window.
 | Hand in view | Cursor follows your palm |
 | Thumb + index pinch | Left click |
 | Thumb + middle pinch | Right click |
-| Index + middle up, ring and pinky down | Scroll — move the hand up or down |
+| Index + middle up, ring and pinky down, thumb clear | Scroll — move the hand up or down |
 | Fist + OK sign, two hands | Draw the bow |
+
+Scroll requires the thumb held clear of the fingertips, which is not fussiness.
+A click pinch barely bends the index finger — it reads right at the extended
+threshold — so a pinch made with the middle finger up and the last two down
+otherwise satisfies the scroll pose exactly. Scroll is resolved before clicks,
+and discards them, so that overlap was silently eating roughly half of all
+clicks depending on which side of the threshold the index landed each frame.
 
 ### The desktop overlay
 

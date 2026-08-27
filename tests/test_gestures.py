@@ -252,6 +252,49 @@ def test_two_fingers_up_requires_the_last_two_fingers_down():
     assert is_two_fingers_up(_hand(ring=CURLED)) is False
 
 
+def test_a_pinching_hand_is_never_scrolling():
+    """The overlap that was eating half the clicks.
+
+    A click pinch barely bends the index — on a real hand it reads right at
+    FINGER_EXTENDED_RATIO — so with the middle up and the last two down it
+    otherwise satisfies the scroll pose exactly. The loop resolves scroll
+    first and feeds the click detectors False, so the click was surviving or
+    dying on which side of 1.15 the index happened to land that frame.
+    """
+    for ratio in (FINGER_EXTENDED_RATIO - 0.01, FINGER_EXTENDED_RATIO + 0.01, 1.30):
+        pinching = _pinched(_hand(index=ratio, ring=CURLED, pinky=CURLED))
+
+        assert is_pinch(pinching) is True
+        assert is_two_fingers_up(pinching) is False
+
+
+def test_scrolling_survives_with_the_thumb_clear():
+    """The other half of the guard: keeping the thumb out of it must not cost
+    the scroll pose itself."""
+    scrolling = _hand(ring=CURLED, pinky=CURLED)
+
+    assert is_pinch(scrolling) is False
+    assert is_two_fingers_up(scrolling) is True
+
+
+def test_a_held_pinch_cannot_leak_into_the_scroll_pose():
+    """The veto is measured against the release threshold, not the entry one,
+    so a pinch drifting inside the hysteresis band is still a pinch as far as
+    every other gesture is concerned — it does not briefly become a scroll on
+    its way back out."""
+    drifting = _hand(index=FINGER_EXTENDED_RATIO + 0.01, ring=CURLED, pinky=CURLED)
+    # Sized off this hand, whose scale is not the one _landmarks uses.
+    band = (pinch_threshold(drifting) + pinch_threshold(drifting, held=True)) / 2
+    index_tip = drifting[INDEX_TIP]
+    drifting[THUMB_TIP] = (index_tip[0], index_tip[1] + band)
+
+    assert pinched_finger(drifting, held=INDEX_TIP) == INDEX_TIP
+
+    assert is_pinch(drifting, held=False) is False
+    assert is_pinch(drifting, held=True) is True
+    assert is_two_fingers_up(drifting) is False
+
+
 def test_pinch_with_three_fingers_extended_is_an_ok_sign():
     assert is_ok_sign(_pinched(_hand(index=CURLED))) is True
 
