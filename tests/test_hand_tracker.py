@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from hand_tracker import HandTracker
+from hand_tracker import FINGER_CHAINS, FINGER_COLORS, PALM_COLOR, HandTracker
 
 
 def test_landmark_positions_converts_normalized_to_pixel_coords():
@@ -120,3 +120,74 @@ def test_draw_landmarks_draws_from_pixel_coordinates():
     # would not come back as the coordinates that went in.
     drawn = [call.args[1] for call in mock_cv2.circle.call_args_list]
     assert drawn == points
+
+
+def _indexed_points():
+    """Each landmark parked at its own index, so a drawn line can be traced
+    back to the two landmarks it connects."""
+    return [(i, 0) for i in range(21)]
+
+
+def _drawn_lines(points):
+    with patch("hand_tracker.cv2") as mock_cv2:
+        HandTracker.draw_landmarks(_frame(), points)
+    return {
+        frozenset((call.args[1][0], call.args[2][0])): call.args[3]
+        for call in mock_cv2.line.call_args_list
+    }
+
+
+def _chain_colors(lines, name):
+    chain = FINGER_CHAINS[name]
+    return {lines[frozenset(pair)] for pair in zip(chain, chain[1:])}
+
+
+def test_each_finger_chain_is_drawn_in_its_own_colour():
+    lines = _drawn_lines(_indexed_points())
+
+    for name in FINGER_CHAINS:
+        assert _chain_colors(lines, name) == {FINGER_COLORS[name]}
+
+
+def test_the_index_and_middle_chains_never_share_a_colour():
+    """The reason this drawing exists at all.
+
+    MediaPipe hands back the index and middle chains transposed when the thumb
+    closes on the middle finger, and which of those two the thumb is nearest is
+    what decides left click against right. Drawn in one colour the swap was
+    invisible, so the skeleton hid the one thing worth looking at.
+    """
+    lines = _drawn_lines(_indexed_points())
+
+    assert _chain_colors(lines, "I").isdisjoint(_chain_colors(lines, "M"))
+
+
+def test_connections_spanning_the_palm_belong_to_no_finger():
+    lines = _drawn_lines(_indexed_points())
+
+    # Knuckle to knuckle across the palm, and the wrist's own two spans. The
+    # palm hangs off landmark 1 rather than the wrist, so (0, 5) is not a
+    # connection MediaPipe draws at all.
+    for span in ((5, 9), (9, 13), (1, 5), (0, 1), (0, 17)):
+        assert lines[frozenset(span)] == PALM_COLOR
+
+
+def test_every_fingertip_is_labelled_with_its_initial():
+    with patch("hand_tracker.cv2") as mock_cv2:
+        HandTracker.draw_landmarks(_frame(), _indexed_points())
+
+    assert {call.args[1] for call in mock_cv2.putText.call_args_list} == set(FINGER_CHAINS)
+
+
+def test_a_label_sits_beside_its_own_fingertip():
+    """Beside, not on: a letter centred on the tip would hide the landmark it
+    is naming."""
+    points = _indexed_points()
+    with patch("hand_tracker.cv2") as mock_cv2:
+        HandTracker.draw_landmarks(_frame(), points)
+
+    for call in mock_cv2.putText.call_args_list:
+        tip = points[FINGER_CHAINS[call.args[1]][-1]]
+        offset = call.args[2]
+        assert offset != tip
+        assert abs(offset[0] - tip[0]) <= 10 and abs(offset[1] - tip[1]) <= 10

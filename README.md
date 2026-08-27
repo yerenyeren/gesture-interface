@@ -32,7 +32,7 @@ Keys, in the camera window:
 | --- | --- |
 | `q` | Quit |
 | `d` | FPS and per-stage timing readout |
-| `s` | Hand skeleton overlay (hidden automatically while the bow is drawn) |
+| `s` | Hand skeleton — a colour per finger (hidden while the bow is drawn) |
 | `t` | Tuning readout — the raw numbers each gesture is being decided on |
 | `o` | Desktop overlay on/off |
 | `p` | Pause — park the cursor without leaving the frame |
@@ -40,6 +40,14 @@ Keys, in the camera window:
 Pause is a key and not a gesture. It was a gesture, and a pause that fires
 when it was not asked for takes the cursor away mid-task — the most expensive
 false positive the app has, and not worth the convenience.
+
+The `s` skeleton draws each finger in its own colour, with its initial beside
+the tip, because the landmarks being in the right *place* does not mean they
+are on the right *finger*. Reaching the thumb toward the middle finger makes
+MediaPipe hand back the index and middle chains transposed, and since which of
+those two the thumb is nearest is exactly what separates a left click from a
+right one, that transposition is the bug — not the thresholds downstream of
+it. In one colour it was invisible. Cyan sitting on your middle finger is not.
 
 The `t` readout exists because a gesture that fails to fire looks identical to
 one that was never made. It shows each finger's extended/curled ratio against
