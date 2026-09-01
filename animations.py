@@ -231,7 +231,12 @@ class Arrow:
     def update(self, frame_width, frame_height):
         self.x += self.vx
         self.y += self.vy
-        margin = self.length
+        # `reach`, not `length`: the point tracked here is the arrowhead and
+        # every other stroke is drawn behind it, so a `length` margin retires an
+        # arrow while the last of its shaft and fletching is still inside the
+        # near edge. It is the same bound the overlay pushes on, for the same
+        # reason — what is still being drawn is still on screen.
+        margin = self.reach
         self.alive = (
             -margin <= self.x <= frame_width + margin
             and -margin <= self.y <= frame_height + margin
@@ -340,7 +345,17 @@ class HorseBow:
         speed *= self.speed_scale
         length = _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
 
-        self.arrows.append(Arrow(nock, (aim[0] * speed, aim[1] * speed), length))
+        # Spawn at the tip, not the nock: `Arrow` reports its head and draws the
+        # whole shaft behind it, while `nock` is the tail. `length` here is
+        # deliberately the same number as `draw`'s `shaft`, so this point is
+        # exactly where the nocked arrow's head sat on the last frame the bow
+        # was drawn and the loosed arrow's first frame continues from it.
+        # Handing `Arrow` the nock instead teleported the head one full arrow
+        # length backwards, behind the archer: at overlay speeds that is several
+        # frames of shaft sliding in from off-screen before the head regains a
+        # point it had already occupied.
+        tip = (nock[0] + aim[0] * length, nock[1] + aim[1] * length)
+        self.arrows.append(Arrow(tip, (aim[0] * speed, aim[1] * speed), length))
         return True
 
     def update(self, frame):

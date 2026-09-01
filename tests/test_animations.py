@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import animations
 from animations import (
     Arrow,
     HorseBow,
@@ -82,6 +83,21 @@ def test_arrow_dies_once_it_leaves_the_frame():
     assert arrow.alive is False
 
 
+def test_an_arrow_is_not_culled_while_its_fletching_is_still_on_screen():
+    """The same anchor mismatch as the spawn, at the far end of the flight: the
+    arrow reports its head and is drawn entirely behind it, so a `length` margin
+    retires it with the tail of the shaft still inside the frame and the last
+    thing the viewer sees is a shot vanishing early."""
+    arrow = Arrow((-295.0, 200.0), (-10.0, 0.0), length=300.0)
+
+    arrow.update(640, 480)
+
+    # The head is past the left edge by more than `length` but less than
+    # `reach`, which is exactly the band the fletching occupies.
+    assert arrow.length < -arrow.x < arrow.reach
+    assert arrow.alive is True
+
+
 def test_loose_launches_an_arrow_toward_the_grip():
     bow = HorseBow()
     # Grip to the right of the nock, so the arrow should fly right.
@@ -91,9 +107,44 @@ def test_loose_launches_an_arrow_toward_the_grip():
     assert len(bow.arrows) == 1
 
     arrow = bow.arrows[0]
-    assert (arrow.x, arrow.y) == (100.0, 200.0)
+    # An arrow reports its head, and the head sits a full shaft ahead of the
+    # nock — where the bow was already drawing it while it was on the string.
+    assert (arrow.x, arrow.y) == (100.0 + arrow.length, 200.0)
     assert arrow.vx > 0
     assert arrow.vy == 0
+
+
+def test_a_loosed_arrow_starts_where_the_nocked_arrow_was_left(monkeypatch):
+    """The regression test for the arrow that flew in from beyond the screen.
+
+    `draw` puts the nocked arrow's head a full shaft ahead of the nock and
+    `Arrow` reports its head too, so constructing one *at* the nock threw the
+    head one whole arrow length backwards, behind the archer, and the shot spent
+    its first frames sliding in from off-screen towards a point it had already
+    occupied. Release has to be seamless: the loosed arrow's first frame puts
+    its tip where the nocked arrow's tip was."""
+    nocked_tips = []
+    real_draw_arrow = animations.draw_arrow
+
+    def spy(frame, tip, direction, length, thickness):
+        nocked_tips.append(tip)
+        real_draw_arrow(frame, tip, direction, length, thickness)
+
+    monkeypatch.setattr(animations, "draw_arrow", spy)
+
+    bow = HorseBow()
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(MAX_DRAW * scale), 200)
+
+    bow.draw(np.zeros((400, 600, 4), np.uint8), grip, nock, scale)
+    assert bow.loose(grip, nock, scale) is True
+
+    # Asking the bow where it actually drew the head rather than recomputing the
+    # shaft length here: a second copy of that formula in the test would drift
+    # alongside the one in `draw` and stop pinning the two together at all.
+    (nocked_tip,) = nocked_tips
+    arrow = bow.arrows[0]
+    assert (arrow.x, arrow.y) == pytest.approx(nocked_tip)
 
 
 def test_loose_ignores_a_bow_that_was_never_drawn():
