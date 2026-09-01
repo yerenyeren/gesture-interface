@@ -76,6 +76,30 @@ class MouseController:
         pyautogui.moveTo(*position)
         self._last_sent = position
 
+    def snap_to(self, x, y):
+        """Put the cursor on the target now, skipping smoothing and the deadzone.
+
+        For the frame a click fires on. `move_to`'s speed-adaptive blend leaves
+        the cursor trailing the hand by up to
+        `(1.0 - CURSOR_MIN_ALPHA) * CURSOR_ALPHA_SPAN` screen pixels — about 74
+        here — and pressing there means the following frames ease off that lag
+        with the button held. That residual travel is a short drag on the end of
+        every click, which is exactly what a click must not be.
+
+        `_smoothed` is set to the unrounded target rather than the clamped
+        integer so the `move_to` on the next frame starts from the target and
+        re-introduces no step of its own, and the move is emitted
+        unconditionally: the deadzone exists to stop jitter from generating
+        traffic, but a click has to land on its point however small the
+        correction is.
+        """
+        target_x, target_y = self.to_screen(x, y)
+        self._smoothed = (target_x, target_y)
+
+        position = self._clamp(int(target_x), int(target_y))
+        pyautogui.moveTo(*position)
+        self._last_sent = position
+
     def _is_negligible(self, position):
         # Measured against the last position actually sent, not the last
         # smoothed one, so that a slow drift still accumulates into a move
@@ -113,6 +137,32 @@ class MouseController:
     def is_pressed(self):
         return self._button_down
 
+    def _button_action(self, action):
+        """Fire a pyautogui button event at the point this app last sent.
+
+        Never call these with no coordinates. pyautogui then fills them in from
+        `position()`, which is `query_pointer` on the X root — and under
+        XWayland that reports XWayland's *cached* pointer, not the
+        compositor's. The cache only updates while the pointer is over an
+        XWayland surface, so it goes stale the moment the cursor crosses a
+        native Wayland window, and pyautogui warps the real pointer back to
+        that stale value before the button event — twice, once in `mouseDown`
+        and again inside the X11 backend's `_mouseDown`. Every click therefore
+        landed at the *previous* click's position, and the following frames
+        moved forward with the button held: not a click, a selection dragged
+        from wherever the last one happened to be.
+
+        Note what `position` above already says — asking pyautogui where the
+        cursor is answers the wrong question. This module knew that; pyautogui
+        was asking anyway, behind its back. Passing coordinates explicitly
+        makes `_normalizeXYArgs` hand them straight back, so no query happens
+        and both warps land on the point the app actually chose.
+        """
+        if self._last_sent is None:
+            action()  # before the first move the app has no opinion
+        else:
+            action(*self._last_sent)
+
     def press(self):
         """Hold the left button down. Idempotent.
 
@@ -121,9 +171,12 @@ class MouseController:
         is: holding the button while the cursor moves is how text gets
         highlighted and how anything gets dragged. A quick pinch still reads as
         an ordinary click, since press and release land a frame or two apart.
+
+        Goes through `_button_action` so the press lands where this app put the
+        cursor rather than where pyautogui guesses it is.
         """
         if not self._button_down:
-            pyautogui.mouseDown()
+            self._button_action(pyautogui.mouseDown)
             self._button_down = True
 
     def release(self):
@@ -134,13 +187,19 @@ class MouseController:
         left down is not a missed click. It is a desktop that keeps selecting
         everything the cursor touches until the app is killed, and the app owns
         the cursor, so recovering by hand is awkward.
+
+        Goes through `_button_action` for the same reason `press` does: a
+        release warped back to a stale pointer ends the drag somewhere the hand
+        never was.
         """
         if self._button_down:
-            pyautogui.mouseUp()
+            self._button_action(pyautogui.mouseUp)
             self._button_down = False
 
     def right_click(self):
-        pyautogui.rightClick()
+        # Same stale-pointer trap as press/release: `rightClick()` with no
+        # coordinates takes the identical `_normalizeXYArgs(None, None)` path.
+        self._button_action(pyautogui.rightClick)
 
     def scroll(self, clicks):
         pyautogui.scroll(clicks)

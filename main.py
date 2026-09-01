@@ -461,6 +461,12 @@ def main():
                         mouse.release()
 
                     if right_click.rose or left_click.rose:
+                        # Land the button exactly where the hand points. The
+                        # smoothed cursor can trail by tens of pixels, and easing
+                        # off that lag with the button held is a drag, not a click.
+                        # Before the guard, so it tests the point the click will
+                        # actually land on rather than the one being left behind.
+                        mouse.snap_to(*palm_center(landmarks))
                         if is_over_window(mouse.position, guarded_window_rect()):
                             # Say so on the HUD: a click swallowed in silence
                             # is indistinguishable from one never detected,
