@@ -1,8 +1,8 @@
 # Gesture Interface
 
 A webcam-based gesture control tool for the desktop: track your hands with
-MediaPipe, drive the mouse cursor with your hand, and draw
-bow across the camera feed when you strike the pose.
+MediaPipe, drive the mouse cursor with your hand, and draw a nomadic horse
+archer's bow across the camera feed when you strike the pose.
 
 ## Setup
 One-time setup:
@@ -13,6 +13,10 @@ mkdir -p assets
 curl -fsSL -o assets/hand_landmarker.task \
   https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
 ```
+
+The `.task` file is the hand landmark model. It is not committed — that `curl`
+is what fetches it — and it is required, not optional: `HandTracker` will not
+construct without it at `assets/hand_landmarker.task`.
 
 To run the app:
 

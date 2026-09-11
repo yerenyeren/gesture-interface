@@ -76,6 +76,18 @@ def _normalize(vector):
     return (x / length, y / length)
 
 
+def _shaft_length(grip, nock, scale):
+    """How long the arrow on the string is: the draw, plus an overhang.
+
+    Written once and called from both `HorseBow.draw` and `HorseBow.loose`
+    because the two must agree exactly. They were two copies of this
+    expression, and when `loose` spawned the arrow at the wrong anchor the
+    error was one whole shaft — this number — which is what made a mis-anchored
+    arrow arrive from off-screen rather than merely look a little off.
+    """
+    return _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
+
+
 def bow_profile(ratio):
     """Control points of the upper half-limb at the given draw (0.0 to 1.0)."""
     t = min(1.0, max(0.0, ratio))
@@ -325,7 +337,7 @@ class HorseBow:
         for tip in ear_tips:
             cv2.line(frame, tip, nock, STRING_COLOR, string, cv2.LINE_AA)
 
-        shaft = _dist(grip, nock) + half_length * 0.45
+        shaft = _shaft_length(grip, nock, scale)
         draw_arrow(
             frame,
             (nock[0] + aim[0] * shaft, nock[1] + aim[1] * shaft),
@@ -343,13 +355,13 @@ class HorseBow:
         power = draw_ratio(grip, nock, scale)
         speed = (ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED))
         speed *= self.speed_scale
-        length = _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
+        length = _shaft_length(grip, nock, scale)
 
         # Spawn at the tip, not the nock: `Arrow` reports its head and draws the
-        # whole shaft behind it, while `nock` is the tail. `length` here is
-        # deliberately the same number as `draw`'s `shaft`, so this point is
-        # exactly where the nocked arrow's head sat on the last frame the bow
-        # was drawn and the loosed arrow's first frame continues from it.
+        # whole shaft behind it, while `nock` is the tail. `_shaft_length` is
+        # the same call `draw` makes, so this point is exactly where the nocked
+        # arrow's head sat on the last frame the bow was drawn, and the loosed
+        # arrow's first frame continues from it.
         # Handing `Arrow` the nock instead teleported the head one full arrow
         # length backwards, behind the archer: at overlay speeds that is several
         # frames of shaft sliding in from off-screen before the head regains a

@@ -265,13 +265,24 @@ def overlay_geometry(mouse, frame_width, frame_height):
     )
 
 
-def rebuild_for_screen(overlay, size, frame_width, frame_height):
+def rebuild_for_screen(mouse, overlay, size, frame_width, frame_height):
     """Rebuild everything that cached the screen size, after a monitor change.
 
     `MouseController` reads `pyautogui.size()` once in its constructor, so it
     goes stale on a display change too — the same staleness that used to crash
     this app from the other direction.
+
+    The outgoing controller is released first, and that is not tidiness. Its
+    replacement starts with the button up, so a rebuild mid-drag would leave the
+    real button held with nothing left that knows it: not even the `finally` on
+    the way out, which by then calls `release` on the new controller and finds
+    nothing to do. Every other path out of ACTIVE releases, and this is the one
+    that does not go through them. It belongs here rather than at the call site
+    because this function creates the replacement — at the call site the hole
+    reopens the moment anything else calls it. Before `overlay.close()`, so a
+    throwing teardown cannot strand the button either.
     """
+    mouse.release()
     overlay.close()
     mouse = MouseController(frame_width, frame_height)
     overlay = DesktopOverlay(*size)
@@ -513,7 +524,7 @@ def main():
                 resized = overlay.poll(time.monotonic())
                 if resized is not None:
                     mouse, overlay, geometry, screen_bow = rebuild_for_screen(
-                        overlay, resized, frame_width, frame_height
+                        mouse, overlay, resized, frame_width, frame_height
                     )
             timer.record("ovl", time.perf_counter() - overlay_started)
 

@@ -1,15 +1,17 @@
 """Tests for the pure helpers in main.py.
 
-main.py is mostly the capture loop and untestable without a camera, but two
+main.py is mostly the capture loop and untestable without a camera, but three
 parts of it are worth pinning down: the metrics HUD, which is what the gesture
-thresholds get tuned against, and the guard that keeps a gesture click from
-landing on the app's own window.
+thresholds get tuned against, the guard that keeps a gesture click from landing
+on the app's own window, and the screen rebuild — the one path out of the
+dragging state that does not run the loop's own release call.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import main
 from gestures import FINGER_CURLED_RATIO, FINGER_EXTENDED_RATIO
+from mouse_control import MouseController
 
 
 def test_finger_state_names_the_two_sides_of_the_thresholds():
@@ -117,3 +119,32 @@ def test_a_window_the_backend_will_not_report_guards_nothing():
         mock_cv2.error = Exception
 
         assert main.guarded_window_rect() is None
+
+
+@patch("main.HorseBow")
+@patch("main.DesktopOverlay")
+@patch("main.MouseController")
+@patch("mouse_control.pyautogui")
+def test_a_screen_rebuild_releases_the_button_it_is_about_to_orphan(
+    mock_pyautogui, mock_controller, mock_overlay, mock_bow
+):
+    """A monitor change replaces the MouseController, and the replacement starts
+    with the button up. So a rebuild during a drag left the real button held
+    with nothing left that knew it — not even the `finally` on the way out,
+    which by then releases the *new* controller and finds nothing to do. Every
+    other path out of ACTIVE releases; this is the one that does not go through
+    them."""
+    mock_pyautogui.size.return_value = (2560, 1440)
+    # The outgoing controller is the real class on purpose: a mock would report
+    # back whatever the code did to it rather than what a held button means.
+    mouse = MouseController(frame_width=640, frame_height=480)
+    mouse.press()
+    # Its replacement needs real numbers — OverlayGeometry.size_scale takes a
+    # min() across the two axis ratios, which bare mocks cannot be compared on.
+    mock_controller.return_value.screen_width = 1920
+    mock_controller.return_value.screen_height = 1080
+
+    main.rebuild_for_screen(mouse, MagicMock(), (1920, 1080), 640, 480)
+
+    mock_pyautogui.mouseUp.assert_called_once()
+    assert mouse.is_pressed is False

@@ -142,10 +142,6 @@ def _thumb_is_pinching(landmarks):
     return any(_dist(thumb, landmarks[tip]) < limit for tip in PINCH_TIPS)
 
 
-def is_open_palm(landmarks):
-    return all(_finger_extended(landmarks, tip, pip) for tip, pip in FINGERS)
-
-
 def is_fist(landmarks):
     return all(_finger_curled(landmarks, tip, pip) for tip, pip in FINGERS)
 

@@ -6,7 +6,6 @@ from gestures import (
     is_fist,
     is_middle_pinch,
     is_ok_sign,
-    is_open_palm,
     is_pinch,
     is_two_fingers_up,
     hand_scale,
@@ -246,25 +245,9 @@ def test_middle_pinch_measures_thumb_against_the_middle_finger():
     assert is_pinch(landmarks) is False
 
 
-def test_all_fingers_extended_is_an_open_palm():
-    assert is_open_palm(_hand()) is True
-
-
-def test_one_curled_finger_is_not_an_open_palm():
-    assert is_open_palm(_hand(pinky=CURLED)) is False
-
-
 def test_all_fingers_curled_is_a_fist():
     assert is_fist(_hand(EXTENDED, CURLED, CURLED, CURLED)) is False
     assert is_fist(_hand(CURLED, CURLED, CURLED, CURLED)) is True
-
-
-def test_fist_and_open_palm_never_agree():
-    fist = _hand(CURLED, CURLED, CURLED, CURLED)
-    palm = _hand()
-
-    assert (is_fist(fist), is_open_palm(fist)) == (True, False)
-    assert (is_fist(palm), is_open_palm(palm)) == (False, True)
 
 
 def test_index_and_middle_up_is_two_fingers_up():
@@ -383,9 +366,7 @@ def test_gesture_metrics_agree_with_the_predicates_they_explain():
     ):
         metrics = gesture_metrics(landmarks)
 
-        extended = [r > FINGER_EXTENDED_RATIO for r in metrics["ratios"]]
         curled = [r < FINGER_CURLED_RATIO for r in metrics["ratios"]]
-        assert all(extended) is is_open_palm(landmarks)
         assert all(curled) is is_fist(landmarks)
 
         assert (metrics["pinched"] == INDEX_TIP) is is_pinch(landmarks)
@@ -399,10 +380,13 @@ def test_gesture_metrics_reports_the_dead_band_between_the_thresholds():
     midway = (FINGER_EXTENDED_RATIO + FINGER_CURLED_RATIO) / 2
     landmarks = _hand(CURLED, CURLED, CURLED, midway)
 
-    pinky_ratio = gesture_metrics(landmarks)["ratios"][3]
-    assert FINGER_CURLED_RATIO < pinky_ratio < FINGER_EXTENDED_RATIO
+    ratios = gesture_metrics(landmarks)["ratios"]
+    assert FINGER_CURLED_RATIO < ratios[3] < FINGER_EXTENDED_RATIO
+    # Neither whole-hand verdict claims it: the hand is not a fist, and not
+    # every finger reads extended either. Stated against the ratios rather than
+    # a predicate because the extended counterpart to `is_fist` was dead code.
     assert is_fist(landmarks) is False
-    assert is_open_palm(landmarks) is False
+    assert not all(r > FINGER_EXTENDED_RATIO for r in ratios)
 
 
 def test_gesture_metrics_names_the_finger_that_won_the_pinch():
