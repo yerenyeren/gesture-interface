@@ -1,13 +1,22 @@
+import math
+
 import numpy as np
 import pytest
 
 import animations
 from animations import (
     Arrow,
+    FallingArrow,
     HorseBow,
     bow_profile,
+    draw_power,
     draw_ratio,
+    is_drawn,
+    is_overdrawn,
     transform_points,
+    ARROW_LENGTH,
+    ARROW_MAX_SPEED,
+    ARROW_MIN_SPEED,
     BOW_HALF_LENGTH,
     BOW_COLOR,
     BOW_HIGHLIGHT,
@@ -101,7 +110,8 @@ def test_an_arrow_is_not_culled_while_its_fletching_is_still_on_screen():
 def test_loose_launches_an_arrow_toward_the_grip():
     bow = HorseBow()
     # Grip to the right of the nock, so the arrow should fly right.
-    nock, grip, scale = (100, 200), (300, 200), 50.0
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(MAX_DRAW * scale), 200)
 
     assert bow.loose(grip, nock, scale) is True
     assert len(bow.arrows) == 1
@@ -136,7 +146,7 @@ def test_a_loosed_arrow_starts_where_the_nocked_arrow_was_left(monkeypatch):
     nock, scale = (100, 200), 50.0
     grip = (100 + int(MAX_DRAW * scale), 200)
 
-    bow.draw(np.zeros((400, 600, 4), np.uint8), grip, nock, scale)
+    bow.draw(np.zeros((400, 600, 4), np.uint8), grip, nock, scale, arrow=True)
     assert bow.loose(grip, nock, scale) is True
 
     # Asking the bow where it actually drew the head rather than recomputing the
@@ -145,15 +155,6 @@ def test_a_loosed_arrow_starts_where_the_nocked_arrow_was_left(monkeypatch):
     (nocked_tip,) = nocked_tips
     arrow = bow.arrows[0]
     assert (arrow.x, arrow.y) == pytest.approx(nocked_tip)
-
-
-def test_loose_ignores_a_bow_that_was_never_drawn():
-    bow = HorseBow()
-    scale = 50.0
-    barely_drawn = (100 + int(MIN_DRAW * scale) - 1, 200)
-
-    assert bow.loose(barely_drawn, (100, 200), scale) is False
-    assert bow.arrows == []
 
 
 def test_a_fuller_draw_launches_a_faster_arrow():
@@ -173,7 +174,7 @@ def test_scaleless_hand_draws_nothing_and_shoots_nothing():
     assert bow.loose((300, 200), (100, 200), 0.0) is False
     assert bow.arrows == []
     # A zero scale would blow up the bow geometry, so draw must bail out too.
-    assert bow.draw(None, (300, 200), (100, 200), 0.0) is None
+    assert bow.draw(None, (300, 200), (100, 200), 0.0, arrow=True) is None
 
 
 def test_bow_half_length_is_expressed_in_hand_scales():
@@ -243,7 +244,9 @@ def test_drawing_on_a_four_channel_canvas_keeps_its_alpha():
     component the bow would draw perfectly and be completely invisible."""
     canvas = np.zeros((600, 600, 4), np.uint8)
 
-    HorseBow().draw(canvas, (300, 300), (150, 300), 40.0)
+    HorseBow().draw(
+        canvas, (150 + int(MAX_DRAW * 40.0), 300), (150, 300), 40.0, arrow=True
+    )
 
     assert canvas[:, :, 3].max() == 255
     opaque = canvas[:, :, 3] == 255
@@ -280,3 +283,193 @@ def test_reach_covers_the_fletching_swept_behind_the_nock():
     arrow = Arrow((100, 200), (40.0, 0.0), 300.0)
 
     assert arrow.reach > arrow.length + max(2, int(arrow.length * 0.018))
+
+
+def test_the_nocked_arrow_is_the_same_length_at_every_draw(monkeypatch):
+    """The bug this replaced: the arrow on the string was the draw length plus
+    an overhang, so it stretched as the string came back."""
+    lengths = []
+    monkeypatch.setattr(
+        animations, "draw_arrow",
+        lambda frame, tip, direction, length, thickness: lengths.append(length),
+    )
+    nock, scale = (100, 200), 50.0
+    canvas = np.zeros((400, 600, 4), np.uint8)
+
+    for draw in (MIN_DRAW, MAX_DRAW, ARROW_LENGTH - 0.1):
+        grip = (100 + int(draw * scale), 200)
+        HorseBow().draw(canvas, grip, nock, scale, arrow=True)
+
+    assert lengths == [ARROW_LENGTH * scale] * 3
+
+
+def test_the_arrow_falls_once_its_point_passes_the_grip():
+    nock, scale = (100, 200), 50.0
+    limit = 100 + ARROW_LENGTH * scale
+
+    assert not is_overdrawn((limit - 1, 200), nock, scale)
+    assert not is_overdrawn((limit, 200), nock, scale)
+    assert is_overdrawn((limit + 1, 200), nock, scale)
+    assert not is_overdrawn((limit + 1, 200), nock, 0.0)
+
+
+def test_full_power_is_reachable_before_the_arrow_falls():
+    """If the drop came at or before a full draw, holding a steady full draw
+    would lose the arrow to tracking jitter alone."""
+    assert MIN_DRAW < MAX_DRAW < ARROW_LENGTH
+
+
+def test_draw_power_is_zero_at_min_draw_and_one_at_full():
+    nock, scale = (100, 200), 50.0
+
+    def power(draw):
+        return draw_power((100 + draw * scale, 200), nock, scale)
+
+    assert power(MIN_DRAW) == pytest.approx(0.0)
+    assert power((MIN_DRAW + MAX_DRAW) / 2) == pytest.approx(0.5)
+    assert power(MAX_DRAW) == pytest.approx(1.0)
+    assert power(MIN_DRAW / 2) == 0.0
+    assert power(ARROW_LENGTH) == 1.0
+    assert draw_power((300, 200), nock, 0.0) == 0.0
+
+
+def test_min_draw_leaves_at_min_speed_and_full_draw_at_max():
+    """Power has to span the whole speed range. Keyed to the old draw ratio,
+    the weakest shot that could be loosed already left at 58% of full speed,
+    so a short draw never felt like a weak one."""
+    nock, scale = (100, 200), 50.0
+    bow = HorseBow()
+
+    bow.loose((100 + MIN_DRAW * scale, 200), nock, scale)
+    bow.loose((100 + MAX_DRAW * scale, 200), nock, scale)
+
+    weak, full = bow.arrows
+    assert weak.vx == pytest.approx(ARROW_MIN_SPEED)
+    assert full.vx == pytest.approx(ARROW_MAX_SPEED)
+
+
+def test_a_bow_without_an_arrow_draws_none(monkeypatch):
+    drawn = []
+    monkeypatch.setattr(animations, "draw_arrow", lambda *args: drawn.append(args))
+    nock, scale = (100, 200), 50.0
+    canvas = np.zeros((400, 600, 4), np.uint8)
+
+    HorseBow().draw(canvas, (100 + int(MAX_DRAW * scale), 200), nock, scale, arrow=False)
+
+    assert drawn == []
+    assert canvas.any(), "the bow and its string are still drawn"
+
+
+def test_a_dropped_arrow_starts_where_the_nocked_arrow_was_left(monkeypatch):
+    """The same seam as the loose. The falling arrow's first position is the
+    nocked arrow's, or it would jump off the string rather than slip off it."""
+    nocked = []
+    real_draw_arrow = animations.draw_arrow
+
+    def spy(frame, tip, direction, length, thickness):
+        nocked.append((tip, direction, length))
+        real_draw_arrow(frame, tip, direction, length, thickness)
+
+    monkeypatch.setattr(animations, "draw_arrow", spy)
+
+    bow = HorseBow()
+    nock, scale = (100, 200), 50.0
+    grip = (100 + int(ARROW_LENGTH * scale) + 5, 190)
+
+    bow.draw(np.zeros((400, 600, 4), np.uint8), grip, nock, scale, arrow=True)
+    assert bow.drop(grip, nock, scale) is True
+
+    ((tip, direction, length),) = nocked
+    (fallen,) = bow.arrows
+    assert isinstance(fallen, FallingArrow)
+    assert (fallen.x, fallen.y) == pytest.approx(tip)
+    assert fallen.direction == pytest.approx(direction)
+    assert fallen.length == length
+
+
+@pytest.mark.parametrize("aim_x", [1, -1])
+def test_a_dropped_arrow_turns_nose_down_whichever_way_it_aimed(aim_x):
+    bow = HorseBow()
+    nock, scale = (1000, 300), 50.0
+    grip = (1000 + aim_x * int(ARROW_LENGTH * scale + 5), 300)
+    bow.drop(grip, nock, scale)
+    (arrow,) = bow.arrows
+    start_y = arrow.y
+
+    downward = []
+    for _ in range(8):
+        arrow.update(2000, 2000)
+        downward.append(arrow.direction[1])
+
+    # The point tips further down every frame, still on the side it was aimed,
+    # and the whole arrow falls.
+    assert all(later > earlier > 0 for earlier, later in zip(downward, downward[1:]))
+    assert arrow.direction[0] * aim_x > 0
+    assert arrow.y > start_y
+    assert arrow.alive
+
+
+def test_a_drop_falls_identically_in_hand_scales_on_both_surfaces():
+    """Gravity is in hand scales, and the desktop pose's scale already carries
+    the overlay's size factor. Multiplying by `speed_scale` as well would make
+    the desktop arrow fall faster than the camera arrow it mirrors."""
+    nock, grip, scale = (100, 200), (270, 180), 50.0
+    camera, desktop = HorseBow(), HorseBow(speed_scale=3.0)
+    camera.drop(grip, nock, scale)
+    desktop.drop((grip[0] * 3, grip[1] * 3), (nock[0] * 3, nock[1] * 3), scale * 3)
+    (small,), (big,) = camera.arrows, desktop.arrows
+    small_start, big_start = (small.x, small.y), (big.x, big.y)
+
+    for _ in range(6):
+        small.update(10_000, 10_000)
+        big.update(10_000, 10_000)
+
+    assert big.x - big_start[0] == pytest.approx(3 * (small.x - small_start[0]))
+    assert big.y - big_start[1] == pytest.approx(3 * (small.y - small_start[1]))
+    assert big.direction == pytest.approx(small.direction)
+
+
+def test_every_inked_pixel_of_a_tumbling_arrow_is_within_reach():
+    """The overlay bounds a falling arrow by `reach` either side of its head,
+    whichever way it has turned. Ink outside that is left burned onto the
+    desktop."""
+    for length in (60.0, 400.0):
+        for step in range(16):
+            angle = step * math.tau / 16
+            direction = (math.cos(angle), math.sin(angle))
+            arrow = FallingArrow((500.0, 500.0), direction, length, 0.0, 0.0)
+            canvas = np.zeros((1000, 1000, 4), np.uint8)
+
+            arrow.draw(canvas)
+
+            rows, cols = np.nonzero(canvas[:, :, 3])
+            assert np.abs(cols - 500).max() <= arrow.reach, (length, step)
+            assert np.abs(rows - 500).max() <= arrow.reach, (length, step)
+
+
+def test_the_bow_never_judges_the_draw_itself():
+    """Whether a draw is long enough to shoot, and whether it is too long to
+    still hold an arrow, are asked once by the caller for both bows. A bow that
+    also judged either on its own rounded pose would, right at a limit, act on
+    one surface and not the other."""
+    nock, scale = (100, 200), 50.0
+    too_short = (100 + int(MIN_DRAW * scale) - 1, 200)
+    past_the_limit = (100 + int(ARROW_LENGTH * scale) + 20, 200)
+    inside_the_limit = (100 + int(MAX_DRAW * scale), 200)
+    assert not is_drawn(too_short, nock, scale)
+    assert is_overdrawn(past_the_limit, nock, scale)
+    assert not is_overdrawn(inside_the_limit, nock, scale)
+
+    bow = HorseBow()
+
+    assert bow.loose(too_short, nock, scale) is True
+    assert bow.loose(past_the_limit, nock, scale) is True
+    assert bow.drop(inside_the_limit, nock, scale) is True
+    assert len(bow.arrows) == 3
+
+
+def test_draw_will_not_guess_whether_there_is_an_arrow():
+    """No default. A call site that forgot to say would draw an arrow the other
+    bow, told correctly, does not have."""
+    with pytest.raises(TypeError):
+        HorseBow().draw(np.zeros((400, 600, 4), np.uint8), (230, 200), (100, 200), 50.0)

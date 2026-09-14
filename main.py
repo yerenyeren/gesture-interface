@@ -3,7 +3,16 @@ import time
 
 import cv2
 
-from animations import HorseBow, draw_ratio, BOW_HALF_LENGTH, MAX_DRAW, MIN_DRAW
+from animations import (
+    HorseBow,
+    draw_power,
+    is_drawn,
+    is_overdrawn,
+    ARROW_LENGTH,
+    BOW_HALF_LENGTH,
+    MAX_DRAW,
+    MIN_DRAW,
+)
 from desktop_overlay import DesktopOverlay, OverlayGeometry, arrow_bounds
 from gesture_state import EdgeDetector
 from gestures import (
@@ -151,6 +160,65 @@ def find_archery_hands(hands):
     if is_fist(second) and is_ok_sign(first):
         return second, first
     return None
+
+
+def archery_pose(archery):
+    """(grip, nock, scale) for what `find_archery_hands` returned, or None."""
+    if archery is None:
+        return None
+    grip_hand, string_hand = archery
+    return palm_center(grip_hand), pinch_point(string_hand), hand_scale(grip_hand)
+
+
+class ArrowOnString:
+    """Whether an arrow is on the bowstring, decided once for both bows.
+
+    The camera bow and the desktop bow draw the same pose at two sizes, each
+    rounded to whole pixels. If each judged a limit for itself, they would
+    disagree right at it. They would also split if the overlay was switched off
+    during a drop, or rebuilt after a monitor change. So the camera pose is
+    asked once, here, whether the arrow falls and whether a release shoots, and
+    both bows are told the answer.
+
+    A re-nock waits for the over-draw detector to have switched off, not merely
+    for a short draw. Without that guard, a one-frame dip under `MIN_DRAW`
+    re-nocked while the detector was still on, no fresh edge followed, and the
+    new arrow stayed on a bow drawn past its end until it was loosed at full
+    power. The drop reads the detector's level rather than `.rose` as well, but
+    that is only a second line of defence: with the guard, the two behave
+    identically.
+    """
+
+    def __init__(self, min_frames=2):
+        self.loaded = True
+        self._overdrawn = EdgeDetector(min_frames=min_frames)
+
+    def update(self, pose):
+        """Call once every frame with the archery pose, or None without one.
+
+        Returns True on the frame the arrow falls off. That only happens on a
+        frame with a pose, since the fall is drawn from it.
+        """
+        self._overdrawn.update(pose is not None and is_overdrawn(*pose))
+        if pose is None:
+            return False
+        if self.loaded and self._overdrawn.is_on:
+            self.loaded = False
+            return True
+        if not self.loaded and not self._overdrawn.is_on and not is_drawn(*pose):
+            # Eased back in close to the grip: a fresh arrow goes on.
+            self.loaded = True
+        return False
+
+    def release(self, pose):
+        """The pose broke, last drawn as `pose`. Should both bows loose?
+
+        Only if there was an arrow, and the draw was long enough to count.
+        Either way, the next draw starts with an arrow on the string.
+        """
+        shoot = self.loaded and is_drawn(*pose)
+        self.loaded = True
+        return shoot
 
 
 def control_hand(hands):
@@ -302,9 +370,9 @@ def metrics_readout(measured, nocked, overlay=None, geometry=None):
         length = math.hypot(grip[0] - nock[0], grip[1] - nock[1]) / scale if scale else 0
         lines.append([
             (
-                f"{'draw':<7}{length:.2f}x hand   ratio "
-                f"{draw_ratio(grip, nock, scale):.2f}   "
-                f"loose > {MIN_DRAW}   full at {MAX_DRAW}",
+                f"{'draw':<7}{length:.2f}x hand   power "
+                f"{draw_power(grip, nock, scale):.2f}   "
+                f"loose > {MIN_DRAW}   full at {MAX_DRAW}   falls past {ARROW_LENGTH}",
                 HUD_COLOR,
             )
         ])
@@ -367,6 +435,7 @@ def main():
     left_click = EdgeDetector(min_frames=1)
     right_click = EdgeDetector(min_frames=1)
     at_full_draw = EdgeDetector()
+    on_string = ArrowOnString()
 
     paused = False
     show_stats = True
@@ -394,30 +463,55 @@ def main():
 
             draw_started = time.perf_counter()
             archery = find_archery_hands(hands)
+            pose = archery_pose(archery)
             at_full_draw.update(archery is not None)
+            # Fed every frame, on every path, like the other detectors. Fed only
+            # while drawing, the over-draw detector stays on through a broken
+            # pose, and the next pose's fresh arrow falls on its first frame.
+            arrow_fell = on_string.update(pose)
 
             # The pose has already broken by the frame the string hand opens, so the
             # shot is taken from the last state the bow was actually drawn in.
             if at_full_draw.fell and nocked is not None:
-                bow.loose(*nocked)
-                if overlay.available and overlay_on:
-                    screen_bow.loose(*geometry.map_pose(*nocked))
+                if on_string.release(nocked):
+                    bow.loose(*nocked)
+                    if overlay.available and overlay_on:
+                        screen_bow.loose(*geometry.map_pose(*nocked))
                 nocked = None
 
             measured = []
             if archery is not None:
                 grip_hand, string_hand = archery
-                nocked = (
-                    palm_center(grip_hand),
-                    pinch_point(string_hand),
-                    hand_scale(grip_hand),
+                # Only on frames with the pose. The loose above reads `nocked`
+                # after the pose is lost, when `pose` is already None.
+                nocked = pose
+                screen_pose = (
+                    geometry.map_pose(*nocked)
+                    if overlay.available and overlay_on
+                    else None
                 )
-                bow.draw(frame, *nocked)
-                if overlay.available and overlay_on:
-                    pose = geometry.map_pose(*nocked)
-                    screen_bow.draw(overlay.canvas, *pose)
-                    overlay.mark(geometry.pose_bounds(*pose))
-                mode = "DRAWING BOW"
+                if arrow_fell:
+                    bow.drop(*nocked)
+                    if screen_pose is not None:
+                        screen_bow.drop(*screen_pose)
+                bow.draw(frame, *nocked, arrow=on_string.loaded)
+                if screen_pose is not None:
+                    screen_bow.draw(
+                        overlay.canvas, *screen_pose, arrow=on_string.loaded
+                    )
+                    overlay.mark(geometry.pose_bounds(*screen_pose))
+                    if on_string.loaded:
+                        overlay.mark(
+                            arrow_bounds([HorseBow.nocked_arrow(*screen_pose)])
+                        )
+                # Named on the HUD: an empty bow fires nothing when the hand
+                # opens, and a shot that silently never happens looks exactly
+                # like a release that was never detected.
+                mode = (
+                    "DRAWING BOW"
+                    if on_string.loaded
+                    else "DRAWING BOW - arrow fell, ease in to nock"
+                )
                 measured = [("grip", grip_hand), ("string", string_hand)]
                 # The mouse deliberately sits idle: the string hand is pinching,
                 # which would otherwise read as a click.
@@ -504,10 +598,11 @@ def main():
                 mouse.release()
                 mouse.reset()
 
-            # Drawn here rather than inside detection because only now is the mode
-            # known — and the bow pose wants the frame to itself. Being after the
-            # bow also puts the skeleton under the arrows instead of over them.
-            if show_skeleton and mode != "DRAWING BOW":
+            # Drawn here rather than inside detection, and never during the
+            # archery pose, because the bow wants the frame to itself. Keyed on
+            # the pose, not the mode string, which changes while drawing. Being
+            # after the bow also puts the skeleton under the arrows, not over.
+            if show_skeleton and archery is None:
                 for landmarks in hands:
                     tracker.draw_landmarks(frame, landmarks)
 

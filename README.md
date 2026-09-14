@@ -56,9 +56,9 @@ it. In one colour it was invisible. Cyan sitting on your middle finger is not.
 The `t` readout exists because a gesture that fails to fire looks identical to
 one that was never made. It shows each finger's extended/curled ratio against
 the thresholds, both pinch distances against that hand's enter/release pair
-along with which fingertip currently owns the pinch, and the draw length while
-the bow is drawn — so a threshold can be moved against a reading rather than a
-guess.
+along with which fingertip currently owns the pinch, and — while the bow is
+drawn — the draw length, the power a shot from it would have, and the length it
+falls past, so a threshold can be moved against a reading rather than a guess.
 
 ## Gestures
 
@@ -115,8 +115,24 @@ swallows no input.
 The archery pose is the steppe **thumb draw**: a closed fist grips the bow while
 the other hand hooks the string with the thumb, index folded over the thumbnail —
 which is what makes it look like an OK sign to a camera. Move the hands apart to
-draw; the limbs flex as the draw lengthens. Open the string hand to loose, and
-the arrow flies off across the frame at a speed set by how far you drew.
+draw; the limbs flex as the draw lengthens. Open the string hand to loose.
+
+The arrow is one fixed length, and how far you draw decides how hard it flies.
+Draws are measured the way the `t` readout shows them, in multiples of the
+fist's size on camera, so they mean the same thing at any distance:
+
+| Draw | What happens |
+| --- | --- |
+| Under 1.0 | Too short to shoot; opening the hand fires nothing |
+| 1.0 to 2.6 | Power climbs from a slow lob to a fast shot |
+| 2.6 to 3.2 | Full power, while the arrow's point creeps back toward the bow |
+| Past 3.2 | The point has been drawn back past the bow, and the arrow falls off |
+
+Once an arrow has fallen the bow is empty, and the HUD says so: opening the hand
+fires nothing. Ease the string hand back in close to the fist and a fresh arrow
+goes on the string, without breaking the pose. The draw has to stay past the
+limit for two frames before the arrow falls, so a single frame of tracking
+jitter at full draw doesn't cost you the arrow.
 
 Needing both hands at once is deliberate: it means a one-handed click pinch can
 never loose an arrow by accident.

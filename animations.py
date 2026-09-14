@@ -29,8 +29,20 @@ BOW_HALF_LENGTH = 3.4
 MAX_DRAW = 2.6  # draw length that counts as a full draw
 MIN_DRAW = 1.0  # anything shorter than this is not a shot
 
-ARROW_MIN_SPEED = 22.0  # pixels per frame at the minimum draw
-ARROW_MAX_SPEED = 70.0  # pixels per frame at a full draw
+# The arrow is one fixed length, nock to point, and that length is also the
+# over-draw limit. Not by coincidence: draw the string back further than the
+# arrow is long and its point has been pulled back past the grip, off the bow,
+# so it falls. Kept clear of MAX_DRAW so a steady full draw has room for jitter.
+ARROW_LENGTH = 3.2
+
+ARROW_MIN_SPEED = 12.0  # pixels per frame at the minimum draw
+ARROW_MAX_SPEED = 72.0  # pixels per frame at a full draw
+
+# An arrow falling off the bow. Gravity is in hand scales per frame squared, like
+# the sizes above, so the overlay's bigger pose already scales it: multiplying by
+# `speed_scale` as well would make the desktop arrow fall faster than the camera's.
+FALL_GRAVITY = 0.1
+FALL_SPIN = 0.12  # radians per frame, tipping the point down
 
 # Upper half-limb of a composite recurve, in bow-space units: the grip sits at
 # the origin, +y runs out along the limb and +x points away from the archer.
@@ -76,18 +88,6 @@ def _normalize(vector):
     return (x / length, y / length)
 
 
-def _shaft_length(grip, nock, scale):
-    """How long the arrow on the string is: the draw, plus an overhang.
-
-    Written once and called from both `HorseBow.draw` and `HorseBow.loose`
-    because the two must agree exactly. They were two copies of this
-    expression, and when `loose` spawned the arrow at the wrong anchor the
-    error was one whole shaft — this number — which is what made a mis-anchored
-    arrow arrive from off-screen rather than merely look a little off.
-    """
-    return _dist(grip, nock) + BOW_HALF_LENGTH * scale * 0.45
-
-
 def bow_profile(ratio):
     """Control points of the upper half-limb at the given draw (0.0 to 1.0)."""
     t = min(1.0, max(0.0, ratio))
@@ -129,13 +129,44 @@ def _catmull_rom(points, samples_per_segment=8):
 def draw_ratio(grip, nock, scale):
     """How far the bow is drawn, 0.0 to 1.0, as a fraction of a full draw.
 
-    `MIN_DRAW` and `MAX_DRAW` are both expressed against this, so it is the one
-    number that decides whether a shot counts at all and how fast the arrow
-    leaves — which is why it is readable from outside the bow.
+    This is how far the limbs flex, and nothing else. How fast the arrow leaves
+    is `draw_power`, which starts counting at `MIN_DRAW` rather than at zero.
     """
     if scale <= 0:
         return 0.0
     return min(1.0, _dist(grip, nock) / (MAX_DRAW * scale))
+
+
+def is_drawn(grip, nock, scale):
+    """Is the bow drawn far enough for a shot to count at all?
+
+    Like `is_overdrawn`, asked once by the caller for both bows, never by a bow.
+    """
+    return scale > 0 and _dist(grip, nock) >= MIN_DRAW * scale
+
+
+def is_overdrawn(grip, nock, scale):
+    """Has the string been drawn back past the end of the arrow?
+
+    The bow never asks this of itself. The camera bow and the desktop bow are
+    handed the same pose at two sizes, each rounded to whole pixels, so near the
+    limit they would answer differently and one would drop an arrow the other
+    still held. `main.py` asks once, of the camera pose, and tells both.
+    """
+    return scale > 0 and _dist(grip, nock) > ARROW_LENGTH * scale
+
+
+def draw_power(grip, nock, scale):
+    """How hard a shot from this draw is: 0.0 at `MIN_DRAW`, 1.0 at a full draw.
+
+    Counted from the shortest draw that shoots rather than from zero. Counted
+    from zero, the weakest possible shot already had 38% power, and the whole
+    range a hand could feel was 40 to 70 pixels a frame.
+    """
+    if scale <= 0:
+        return 0.0
+    drawn = _dist(grip, nock) - MIN_DRAW * scale
+    return min(1.0, max(0.0, drawn / ((MAX_DRAW - MIN_DRAW) * scale)))
 
 
 def limb_sections(ratio):
@@ -232,17 +263,28 @@ def draw_arrow(frame, tip, direction, length, thickness):
 
 
 class Arrow:
-    """A loosed arrow flying across the frame until it leaves it."""
+    """An arrow flying across the frame until it leaves it.
 
-    def __init__(self, position, velocity, length):
+    `HorseBow.nocked_arrow` also builds one at rest, for the arrow still on the
+    string, so the arrow drawn nocked and the arrow loosed share all their code.
+    """
+
+    def __init__(self, position, velocity, length, direction=None):
         self.x, self.y = float(position[0]), float(position[1])
         self.vx, self.vy = velocity
         self.length = length
+        # Stored rather than read off the velocity: an arrow still on the string
+        # has no velocity to read, and a falling one points wherever it has
+        # tumbled to rather than the way it is moving.
+        self.direction = _normalize(velocity) if direction is None else direction
         self.alive = True
 
     def update(self, frame_width, frame_height):
         self.x += self.vx
         self.y += self.vy
+        self._cull(frame_width, frame_height)
+
+    def _cull(self, frame_width, frame_height):
         # `reach`, not `length`: the point tracked here is the arrowhead and
         # every other stroke is drawn behind it, so a `length` margin retires an
         # arrow while the last of its shaft and fletching is still inside the
@@ -269,18 +311,49 @@ class Arrow:
         return self.length + _fletching(self.length)[1] + max(2, int(self.length * 0.018))
 
     def draw(self, frame):
-        direction = _normalize((self.vx, self.vy))
         thickness = max(2, int(self.length * 0.018))
 
-        draw_arrow(frame, (self.x, self.y), direction, self.length, thickness)
+        draw_arrow(frame, (self.x, self.y), self.direction, self.length, thickness)
+
+
+class FallingArrow(Arrow):
+    """An arrow that has slipped off an over-drawn bow and is falling.
+
+    It turns about its middle rather than about the head it reports. That is
+    what makes it look like it is falling, not swinging from a pin. The head is
+    still the point tracked, and every stroke is still drawn behind it within
+    `reach` whichever way it has turned, so culling and the overlay's
+    `arrow_bounds` need to know nothing about it.
+    """
+
+    def __init__(self, position, direction, length, gravity, spin):
+        super().__init__(position, (0.0, 0.0), length, direction=direction)
+        self.gravity = gravity
+        self.spin = spin
+
+    def update(self, frame_width, frame_height):
+        half = self.length / 2
+        dx, dy = self.direction
+        self.vy += self.gravity
+        middle_x = self.x - dx * half + self.vx
+        middle_y = self.y - dy * half + self.vy
+        turn_cos, turn_sin = math.cos(self.spin), math.sin(self.spin)
+        self.direction = (dx * turn_cos - dy * turn_sin, dx * turn_sin + dy * turn_cos)
+        self.x = middle_x + self.direction[0] * half
+        self.y = middle_y + self.direction[1] * half
+        self._cull(frame_width, frame_height)
 
 
 class HorseBow:
     """A nomadic composite recurve that follows the archer's hands.
 
-    `draw` renders the bow held between the grip and string hands; `loose`
-    launches an arrow when the string hand opens; `update` keeps arrows already
-    in flight moving after the pose has broken.
+    `draw` renders the bow held between the grip and string hands, with or
+    without an arrow on the string. `loose` launches that arrow when the string
+    hand opens, and `drop` lets it fall off an over-drawn bow. `update` keeps
+    arrows moving, in flight or falling, after the pose has broken.
+
+    Whether an arrow is on the string is not the bow's to decide (see
+    `is_overdrawn`), so it is passed in rather than remembered here.
     """
 
     def __init__(self, speed_scale=1.0):
@@ -295,7 +368,7 @@ class HorseBow:
     def _aim(grip, nock):
         return _normalize((grip[0] - nock[0], grip[1] - nock[1]))
 
-    def draw(self, frame, grip, nock, scale):
+    def draw(self, frame, grip, nock, scale, *, arrow):
         if scale <= 0:
             return
 
@@ -337,37 +410,61 @@ class HorseBow:
         for tip in ear_tips:
             cv2.line(frame, tip, nock, STRING_COLOR, string, cv2.LINE_AA)
 
-        shaft = _shaft_length(grip, nock, scale)
-        draw_arrow(
-            frame,
-            (nock[0] + aim[0] * shaft, nock[1] + aim[1] * shaft),
-            aim,
-            shaft,
-            max(2, limb // 2),
-        )
+        if arrow:
+            self.nocked_arrow(grip, nock, scale).draw(frame)
+
+    @classmethod
+    def nocked_arrow(cls, grip, nock, scale):
+        """The arrow on the string, at rest: its nock on the string, point ahead.
+
+        `draw`, `loose` and `drop` all take their arrow from here, so an arrow
+        leaving the bow starts exactly where the one on the string was drawn.
+        That matters: `Arrow` reports its head and draws the shaft behind it.
+        When `loose` once spawned the arrow at the nock instead, the head jumped
+        a whole shaft backwards and every shot slid in from behind the archer.
+        `main.py` bounds it from here too, so the overlay pushes exactly the
+        ink that was drawn.
+        """
+        aim = cls._aim(grip, nock)
+        length = ARROW_LENGTH * scale
+        head = (nock[0] + aim[0] * length, nock[1] + aim[1] * length)
+        return Arrow(head, (0.0, 0.0), length, direction=aim)
 
     def loose(self, grip, nock, scale):
-        """Launch an arrow. Returns False if the bow was never really drawn."""
-        if scale <= 0 or _dist(grip, nock) < MIN_DRAW * scale:
+        """Launch the arrow on the string. False only with no hand to draw from.
+
+        Deliberately judges neither end of the draw. Whether it was long enough
+        to shoot, and whether it was too long to still hold an arrow, are both
+        decided once by the caller for both bows, for the reason `is_overdrawn`
+        gives.
+        """
+        if scale <= 0:
             return False
 
-        aim = self._aim(grip, nock)
-        power = draw_ratio(grip, nock, scale)
-        speed = (ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED))
+        arrow = self.nocked_arrow(grip, nock, scale)
+        power = draw_power(grip, nock, scale)
+        speed = ARROW_MIN_SPEED + power * (ARROW_MAX_SPEED - ARROW_MIN_SPEED)
         speed *= self.speed_scale
-        length = _shaft_length(grip, nock, scale)
+        arrow.vx = arrow.direction[0] * speed
+        arrow.vy = arrow.direction[1] * speed
+        self.arrows.append(arrow)
+        return True
 
-        # Spawn at the tip, not the nock: `Arrow` reports its head and draws the
-        # whole shaft behind it, while `nock` is the tail. `_shaft_length` is
-        # the same call `draw` makes, so this point is exactly where the nocked
-        # arrow's head sat on the last frame the bow was drawn, and the loosed
-        # arrow's first frame continues from it.
-        # Handing `Arrow` the nock instead teleported the head one full arrow
-        # length backwards, behind the archer: at overlay speeds that is several
-        # frames of shaft sliding in from off-screen before the head regains a
-        # point it had already occupied.
-        tip = (nock[0] + aim[0] * length, nock[1] + aim[1] * length)
-        self.arrows.append(Arrow(tip, (aim[0] * speed, aim[1] * speed), length))
+    def drop(self, grip, nock, scale):
+        """Let the arrow on the string fall off the bow. False with no hand."""
+        if scale <= 0:
+            return False
+
+        nocked = self.nocked_arrow(grip, nock, scale)
+        # y runs down the frame, so turning the way the arrow points tips its
+        # point downward whichever way the bow is aimed.
+        spin = math.copysign(FALL_SPIN, nocked.direction[0])
+        self.arrows.append(
+            FallingArrow(
+                (nocked.x, nocked.y), nocked.direction, nocked.length,
+                FALL_GRAVITY * scale, spin,
+            )
+        )
         return True
 
     def update(self, frame):

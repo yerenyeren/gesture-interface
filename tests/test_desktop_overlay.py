@@ -131,7 +131,8 @@ def test_hand_scale_is_multiplied_by_the_same_factor():
     assert scale == 180.0
 
 
-def test_pose_bounds_contains_the_bow_and_the_arrow_tip():
+def test_pose_bounds_contains_the_bow_and_the_string_hand():
+    # Not the arrow on the string: that is bounded by its `reach`, like any other.
     geometry = _geometry()
     grip, nock, scale = (1280, 720), (1000, 720), 100.0
 
@@ -302,12 +303,19 @@ def test_every_drawn_pixel_falls_inside_the_rect_that_gets_pushed():
     """The property that actually matters, and the one that caught a real bug:
     anything drawn but not pushed stays burned onto the desktop, because the
     canvas is wiped only where it was pushed. Reasoning about the bow's extent
-    missed what was drawn behind the arrow; drawing it and looking did not."""
+    missed what was drawn behind the arrow; drawing it and looking did not.
+
+    Played at desktop scale, through a full draw and loose and then through an
+    over-draw that drops the arrow. That is where the fletching of an arrow
+    still on the string outgrew the fixed margin it used to be bounded by: on
+    the frame the draw first passes the limit, before the drop is confirmed."""
     import math
 
-    from animations import BOW_HALF_LENGTH, HorseBow
+    from animations import (
+        ARROW_LENGTH, BOW_HALF_LENGTH, MAX_DRAW, FallingArrow, HorseBow, is_overdrawn,
+    )
 
-    width, height = 1280, 720
+    width, height = 2560, 1440
     geometry = OverlayGeometry(
         (640, 480), (width, height),
         anchor=lambda x, y: (x / 640 * width, y / 480 * height),
@@ -315,26 +323,55 @@ def test_every_drawn_pixel_falls_inside_the_rect_that_gets_pushed():
     )
     bow = HorseBow(speed_scale=geometry.size_scale)
     canvas = np.zeros((height, width, 4), np.uint8)
+    # At 30 degrees, an arrow drawn past the limit pushes its fletching nearly
+    # as far outside `pose_bounds` as any aim does: about 9 px at this scale,
+    # against 5 px at 18 degrees.
+    hand, aim = 80.0, math.radians(30)
 
     previous = pose = None
-    drawn_last = False
+    drawn_last, loaded = False, True
+    overdrawn_frames = falling_frames = drops = 0
     for frame in range(90):
         elapsed = frame / 15.0
         phase = elapsed % 3.0
         current = None
         if phase < 2.0:
-            pull = min(1.0, phase / 1.6)
-            grip = (420 + 40 * math.sin(elapsed), 240 + 30 * math.cos(elapsed))
-            nock = (grip[0] - 40 - 110 * pull, grip[1] + 10 * pull)
-            pose = geometry.map_pose(grip, nock, 55.0)
-            bow.draw(canvas, *pose)
+            if elapsed < 3.0:
+                # A full draw, loosed.
+                draw = MAX_DRAW * min(1.0, phase / 1.6) * hand
+            else:
+                # A yank: held just short of the limit, then straight past it in
+                # one frame. Only that far past does the arrow still on the
+                # string overhang the bow's own bounds, and only for the frame
+                # before the drop is confirmed.
+                held = 0.95 * ARROW_LENGTH * min(1.0, phase / 1.2)
+                draw = (held if phase < 1.4 else 1.25 * ARROW_LENGTH) * hand
+            grip = (420 + 20 * math.sin(elapsed), 240 + 15 * math.cos(elapsed))
+            nock = (grip[0] - draw * math.cos(aim), grip[1] + draw * math.sin(aim))
+            pose = geometry.map_pose(grip, nock, hand)
+            # Debounced like the app's: one frame past the limit is drawn with
+            # the arrow still on, and the second drops it.
+            overdrawn_frames = overdrawn_frames + 1 if is_overdrawn(grip, nock, hand) else 0
+            if loaded and overdrawn_frames >= 2:
+                bow.drop(*pose)
+                loaded, drops = False, drops + 1
+            bow.draw(canvas, *pose, arrow=loaded)
             current = geometry.pose_bounds(*pose)
+            if loaded:
+                current = union_rect(
+                    current, arrow_bounds([HorseBow.nocked_arrow(*pose)])
+                )
             drawn_last = True
         elif drawn_last:
-            bow.loose(*pose)
-            drawn_last = False
+            if loaded:
+                bow.loose(*pose)
+            loaded, drawn_last = True, False
 
         bow.update(canvas)
+        falling_frames += any(
+            isinstance(arrow, FallingArrow) and 0 <= arrow.y < height
+            for arrow in bow.arrows
+        )
         current = union_rect(current, arrow_bounds(bow.arrows))
         pushed = clip_rect(union_rect(previous, current), width, height)
 
@@ -352,4 +389,6 @@ def test_every_drawn_pixel_falls_inside_the_rect_that_gets_pushed():
             x, y, pushed_width, pushed_height = pushed
             canvas[y:y + pushed_height, x:x + pushed_width] = 0
 
+    assert drops == 1, "the over-draw never dropped the arrow"
+    assert falling_frames >= 5, "the dropped arrow was never drawn falling"
     assert canvas[:, :, 3].max() == 0, "canvas left dirty after the last commit"

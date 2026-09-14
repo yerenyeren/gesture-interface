@@ -15,8 +15,6 @@ Geometry is separated from I/O the same way `animations.py` separates
 testable with no display, and importing this module opens no connection.
 """
 
-import math
-
 import numpy as np
 from Xlib import X, Xatom, Xutil, display
 
@@ -122,25 +120,22 @@ class OverlayGeometry:
         )
 
     def pose_bounds(self, grip, nock, scale, margin=24):
-        """Rect covering the drawn bow, its string and its nocked arrow.
+        """Rect covering the drawn bow and its string.
+
+        The arrow on the string is not included. It is drawn entirely behind
+        the head it reports, like any other arrow, so the caller bounds it by
+        its `reach` with `arrow_bounds`. This method used to cover it with a
+        fixed margin around the nock instead. Measured at desktop scale, an
+        arrow drawn past the limit, on the frames before its drop is confirmed,
+        put fletching outside that margin.
 
         Closed form rather than scanning the canvas for ink: measured, a
         full-screen `max` over the alpha channel costs ~92 ms, which is more
         than a whole frame.
         """
         reach = self.bow_reach * scale
-        drawn = math.hypot(grip[0] - nock[0], grip[1] - nock[1])
-        # The nocked arrow points from the nock through the grip and out past it.
-        arrow_tip = drawn + reach * 0.45
-        if drawn > 0:
-            direction = ((grip[0] - nock[0]) / drawn, (grip[1] - nock[1]) / drawn)
-        else:
-            direction = (0.0, 0.0)
-        tip = (nock[0] + direction[0] * arrow_tip,
-               nock[1] + direction[1] * arrow_tip)
-
-        xs = (grip[0] - reach, grip[0] + reach, nock[0], tip[0])
-        ys = (grip[1] - reach, grip[1] + reach, nock[1], tip[1])
+        xs = (grip[0] - reach, grip[0] + reach, nock[0])
+        ys = (grip[1] - reach, grip[1] + reach, nock[1])
         x0, y0 = int(min(xs)) - margin, int(min(ys)) - margin
         x1, y1 = int(max(xs)) + margin, int(max(ys)) + margin
         return (x0, y0, x1 - x0, y1 - y0)
