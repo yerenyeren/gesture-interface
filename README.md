@@ -117,9 +117,14 @@ the other hand hooks the string with the thumb, index folded over the thumbnail 
 which is what makes it look like an OK sign to a camera. Move the hands apart to
 draw; the limbs flex as the draw lengthens. Open the string hand to loose.
 
-The arrow is one fixed length, and how far you draw decides how hard it flies.
-Draws are measured the way the `t` readout shows them, in multiples of the
-fist's size on camera, so they mean the same thing at any distance:
+The bow is one fixed size and the arrow one fixed length, and how far you draw
+decides how hard it flies. The size is deliberately not taken from the fist: a
+fist looks smaller on camera as it turns, and when the bow was sized from it,
+the bow shrank and grew in your hand and the draw that drops the arrow moved
+with it. The trade-off is distance. A fixed size does not follow you, so sitting
+closer to the camera makes the same pull read as a longer draw. Draws are
+measured the way the `t` readout shows them, in multiples of one fixed length
+(`BOW_SCALE` in `main.py`, which the readout gives in pixels):
 
 | Draw | What happens |
 | --- | --- |

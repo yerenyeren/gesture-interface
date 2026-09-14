@@ -125,7 +125,7 @@ def test_a_square_stays_square():
     assert right[0] - 1280 == down[1] - 720 == 300
 
 
-def test_hand_scale_is_multiplied_by_the_same_factor():
+def test_the_pose_scale_is_multiplied_by_the_same_factor():
     _, _, scale = _geometry().map_pose((320, 240), (400, 240), 60)
 
     assert scale == 180.0

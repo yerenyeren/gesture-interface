@@ -17,7 +17,6 @@ from desktop_overlay import DesktopOverlay, OverlayGeometry, arrow_bounds
 from gesture_state import EdgeDetector
 from gestures import (
     gesture_metrics,
-    hand_scale,
     is_fist,
     is_middle_pinch,
     is_ok_sign,
@@ -38,6 +37,20 @@ from mouse_control import MouseController
 # which also means it fills the screen the way it fills the frame — the first
 # thing worth turning down if that is too much. Shown on the `t` readout.
 OVERLAY_SCALE = 1.0
+
+# The unit every bow size and draw length is a multiple of, as a share of the
+# camera frame's height. Shown in pixels on the `t` readout's draw line; 0.14 is
+# 67px of a 480-line frame, an estimate not yet checked against a real fist.
+#
+# Fixed on purpose, not measured off the fist. A fist looks smaller on camera as
+# it turns, and while its wrist-to-knuckle length sized the bow, the bow shrank
+# and grew as the fist rotated, and the draws that reach full power and drop the
+# arrow moved with it. The cost is distance: a fixed unit does not follow you, so
+# sitting closer makes the same pull read as a longer draw. A share of the height
+# rather than a pixel count, because the camera can return a different frame
+# size and the landmarks scale with the frame. To tune, hold the fist square to
+# the camera and match the `grip` line's `scale`.
+BOW_SCALE = 0.14
 
 SCROLL_DEADZONE_PX = 12
 SCROLL_GAIN = 0.4
@@ -162,12 +175,17 @@ def find_archery_hands(hands):
     return None
 
 
-def archery_pose(archery):
-    """(grip, nock, scale) for what `find_archery_hands` returned, or None."""
+def archery_pose(archery, frame_height):
+    """(grip, nock, scale) for what `find_archery_hands` returned, or None.
+
+    The scale is `BOW_SCALE` of the frame height, never the grip hand's own
+    `hand_scale`. That measures wrist to knuckle on camera, which shortens as
+    the fist turns, so a bow sized from it changed size mid-draw.
+    """
     if archery is None:
         return None
     grip_hand, string_hand = archery
-    return palm_center(grip_hand), pinch_point(string_hand), hand_scale(grip_hand)
+    return palm_center(grip_hand), pinch_point(string_hand), BOW_SCALE * frame_height
 
 
 class ArrowOnString:
@@ -370,7 +388,7 @@ def metrics_readout(measured, nocked, overlay=None, geometry=None):
         length = math.hypot(grip[0] - nock[0], grip[1] - nock[1]) / scale if scale else 0
         lines.append([
             (
-                f"{'draw':<7}{length:.2f}x hand   power "
+                f"{'draw':<7}{length:.2f} x {scale:.0f}px   power "
                 f"{draw_power(grip, nock, scale):.2f}   "
                 f"loose > {MIN_DRAW}   full at {MAX_DRAW}   falls past {ARROW_LENGTH}",
                 HUD_COLOR,
@@ -463,7 +481,7 @@ def main():
 
             draw_started = time.perf_counter()
             archery = find_archery_hands(hands)
-            pose = archery_pose(archery)
+            pose = archery_pose(archery, frame_height)
             at_full_draw.update(archery is not None)
             # Fed every frame, on every path, like the other detectors. Fed only
             # while drawing, the over-draw detector stays on through a broken

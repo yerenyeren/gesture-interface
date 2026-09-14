@@ -81,8 +81,8 @@ class OverlayGeometry:
 
     So only the grip is mapped through the anisotropic screen map — the same
     function that positions the cursor, so the bow lands where the app already
-    says that hand is — and the nock and the hand scale are derived from it with
-    one isotropic factor, which leaves every angle and proportion intact.
+    says that hand is — and the nock and the scale are derived from it with one
+    isotropic factor, which leaves every angle and proportion intact.
     """
 
     def __init__(self, frame_size, screen_size, anchor, bow_reach,
@@ -106,7 +106,7 @@ class OverlayGeometry:
             self.screen_height / self.frame_height,
         )
 
-    def map_pose(self, grip, nock, hand_scale):
+    def map_pose(self, grip, nock, scale):
         anchored = self.anchor(*grip)
         factor = self.size_scale
         mapped_nock = (
@@ -116,7 +116,7 @@ class OverlayGeometry:
         return (
             (int(anchored[0]), int(anchored[1])),
             (int(mapped_nock[0]), int(mapped_nock[1])),
-            hand_scale * factor,
+            scale * factor,
         )
 
     def pose_bounds(self, grip, nock, scale, margin=24):

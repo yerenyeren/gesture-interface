@@ -23,8 +23,9 @@ SHAFT_COLOR = (150, 200, 235, 255)
 HEAD_COLOR = (215, 235, 250, 255)
 FLETCHING_COLOR = (70, 90, 225, 255)
 
-# Sizes below are multiples of the grip hand's `hand_scale`, so the bow is drawn
-# proportional to the hand rather than to a fixed pixel count.
+# Sizes below are multiples of the pose's `scale`, which the caller fixes rather
+# than taking from the grip hand: a fist looks smaller on camera as it turns, and
+# a bow sized from one shrank and grew in the archer's hand.
 BOW_HALF_LENGTH = 3.4
 MAX_DRAW = 2.6  # draw length that counts as a full draw
 MIN_DRAW = 1.0  # anything shorter than this is not a shot
@@ -38,8 +39,8 @@ ARROW_LENGTH = 3.2
 ARROW_MIN_SPEED = 12.0  # pixels per frame at the minimum draw
 ARROW_MAX_SPEED = 72.0  # pixels per frame at a full draw
 
-# An arrow falling off the bow. Gravity is in hand scales per frame squared, like
-# the sizes above, so the overlay's bigger pose already scales it: multiplying by
+# An arrow falling off the bow. Gravity is in scales per frame squared, like the
+# sizes above, so the overlay's bigger pose already scales it: multiplying by
 # `speed_scale` as well would make the desktop arrow fall faster than the camera's.
 FALL_GRAVITY = 0.1
 FALL_SPIN = 0.12  # radians per frame, tipping the point down
@@ -359,7 +360,7 @@ class HorseBow:
     def __init__(self, speed_scale=1.0):
         self.arrows = []
         # ARROW_MIN_SPEED/ARROW_MAX_SPEED are the only quantities in this module
-        # counted in absolute pixels rather than hand scales, so a bow drawn at
+        # counted in absolute pixels rather than scales, so a bow drawn at
         # desktop size would fire arrows that crawl. Scaling them alongside the
         # bow is what keeps the shot looking the same on either surface.
         self.speed_scale = speed_scale

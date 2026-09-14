@@ -177,9 +177,9 @@ def test_scaleless_hand_draws_nothing_and_shoots_nothing():
     assert bow.draw(None, (300, 200), (100, 200), 0.0, arrow=True) is None
 
 
-def test_bow_half_length_is_expressed_in_hand_scales():
-    # Sizes are multiples of hand_scale so the bow tracks the hand's distance
-    # from the camera rather than sitting at a fixed pixel size.
+def test_bow_half_length_is_expressed_in_scales():
+    # Sizes are multiples of the pose's scale rather than pixel counts. The
+    # caller fixes that scale; it is no longer the grip hand's size.
     assert BOW_HALF_LENGTH > 0
     assert MIN_DRAW < MAX_DRAW
 
@@ -409,8 +409,8 @@ def test_a_dropped_arrow_turns_nose_down_whichever_way_it_aimed(aim_x):
     assert arrow.alive
 
 
-def test_a_drop_falls_identically_in_hand_scales_on_both_surfaces():
-    """Gravity is in hand scales, and the desktop pose's scale already carries
+def test_a_drop_falls_identically_in_scales_on_both_surfaces():
+    """Gravity is in scales, and the desktop pose's scale already carries
     the overlay's size factor. Multiplying by `speed_scale` as well would make
     the desktop arrow fall faster than the camera arrow it mirrors."""
     nock, grip, scale = (100, 200), (270, 180), 50.0

@@ -1,19 +1,20 @@
 """Tests for the pure helpers in main.py.
 
-main.py is mostly the capture loop and untestable without a camera, but four
+main.py is mostly the capture loop and untestable without a camera, but five
 parts of it are worth pinning down:
 - the metrics HUD, which the gesture thresholds get tuned against;
 - the guard that keeps a gesture click from landing on the app's own window;
 - the screen rebuild, the one path out of the dragging state that does not run
   the loop's own release call;
 - whether there is an arrow on the bowstring, which both bows are told rather
-  than left to decide.
+  than left to decide;
+- the bow's size, which a turning fist must not change.
 """
 
 from unittest.mock import MagicMock, patch
 
 import main
-from gestures import FINGER_CURLED_RATIO, FINGER_EXTENDED_RATIO
+from gestures import FINGER_CURLED_RATIO, FINGER_EXTENDED_RATIO, hand_scale
 from mouse_control import MouseController
 
 
@@ -154,7 +155,7 @@ def test_a_screen_rebuild_releases_the_button_it_is_about_to_orphan(
 
 
 def _pose(draw, scale=50.0):
-    """An archery pose (grip, nock, scale) drawn `draw` hand scales long."""
+    """An archery pose (grip, nock, scale) drawn `draw` scales long."""
     return (100 + draw * scale, 200), (100, 200), scale
 
 
@@ -251,3 +252,28 @@ def test_metrics_readout_shows_power_and_the_fall_limit():
 
     assert "power 1.00" in text
     assert f"falls past {main.ARROW_LENGTH}" in text
+    # The unit, in pixels, so it can be held up against the grip hand's scale.
+    assert "x 50px" in text
+
+
+def test_turning_the_fist_changes_neither_the_bow_nor_where_the_arrow_falls():
+    """Turning a fist foreshortens wrist to knuckle on camera, and that length
+    is all `hand_scale` measures. When it sized the bow, the bow shrank as the
+    fist turned. The fall limit came in with it, until a steady full draw
+    dropped its arrow."""
+    import sys
+    sys.path.insert(0, "tests")
+    from test_gestures import PARKED, _landmarks
+
+    flat = _landmarks(PARKED, PARKED, scale=80)
+    turned = _landmarks(PARKED, PARKED, scale=40)
+    assert hand_scale(turned) < hand_scale(flat)
+
+    unit = main.BOW_SCALE * 480
+    full_draw = (2.8 * unit, 0)  # past MAX_DRAW, short of ARROW_LENGTH
+    string = _landmarks(full_draw, full_draw)
+
+    for grip in (flat, turned):
+        pose = main.archery_pose((grip, string), 480)
+        assert pose[2] == unit
+        assert not main.is_overdrawn(*pose)
